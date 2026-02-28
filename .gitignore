@@ -1,0 +1,55 @@
+# Foundry/Forge
+cache/
+out/
+
+# Broadcast logs - keep production deployment records
+broadcast/
+lib/
+
+# Environment variables (NEVER commit private keys!)
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Testing
+coverage/
+.coverage
+lcov.info
+
+# Remix artifacts (if using Remix IDE)
+**/artifacts/
+**/artifacts/**
+deps/
+states/
+*.dbg.json
+
+# Misc
+*.cache
+.cache/
+.temp/
+temp/
+*.tsbuildinfo
