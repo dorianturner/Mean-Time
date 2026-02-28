@@ -7,9 +7,9 @@ import { useTokenSymbols } from './hooks/useTokenSymbols.js'
 import { useWallet }       from './hooks/useWallet.js'
 import './App.css'
 
-const MEANTIME_ADDR = (import.meta.env.VITE_MEANTIME_ADDR ?? '0xff022c195F9e3bA7c16ac5DEE5c42579928eAC59') as `0x${string}`
-const USDC_ADDR     = import.meta.env.VITE_USDC_ADDR ?? '0xd082DEf36a0df2def3B64D09d4fa834A623A27C4'
-const EURC_ADDR     = import.meta.env.VITE_EURC_ADDR ?? '0x507442087DFE8e7664202FAc6b7E0E5c8366ae42'
+const MEANTIME_ADDR = (import.meta.env.VITE_MEANTIME_ADDR ?? '0x7b3ae61DAe4bFB32A0bF1A79518337a63cBF1Acc') as `0x${string}`
+const USDC_ADDR     = import.meta.env.VITE_USDC_ADDR ?? '0xf854088BdeEC62DafF50Cf1a2C06afE97bBe9711'
+const EURC_ADDR     = import.meta.env.VITE_EURC_ADDR ?? '0x9594496D0Cda45B30BB15d905D5e224626b44688'
 
 type Tab = 'marketplace' | 'bridge'
 

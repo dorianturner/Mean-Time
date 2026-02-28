@@ -9,8 +9,10 @@ const PORT = Number(process.env.PORT ?? 3001)
 const ctx   = buildCtx()
 const store = createStore()
 
-// Replay historical events, then start live watcher + HTTP server
-backfillStore(ctx, store).then(() => {
+// Replay historical events (best-effort), then start live watcher + HTTP server
+backfillStore(ctx, store).catch((err) => {
+  console.warn('[backfill] Failed (non-fatal, live watcher will still run):', err.message ?? err)
+}).then(() => {
   const stopWatcher = startWatcher(ctx, store)
 
   const app = createApp(ctx, store)
@@ -31,7 +33,4 @@ backfillStore(ctx, store).then(() => {
     stopWatcher()
     server.close(() => process.exit(0))
   })
-}).catch((err) => {
-  console.error('Failed to start:', err)
-  process.exit(1)
 })

@@ -102,3 +102,16 @@ export const MEANTIME_ABI = [
     outputs: [],
   },
 ] as const
+
+export const ERC20_MINT_ABI = [
+  {
+    type: 'function',
+    name: 'mint',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to',     type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+] as const

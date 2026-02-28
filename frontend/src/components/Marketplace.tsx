@@ -27,12 +27,55 @@ function encodeApprove(spender: string, amount: bigint): string {
   return sig + spender.replace('0x', '').padStart(64, '0') + amount.toString(16).padStart(64, '0')
 }
 
-async function sendTx(from: string, to: string, data: string) {
+const ARC_CHAIN_ID = '0x4cef52' // 5042002
+
+async function ensureArcTestnet() {
   if (!window.ethereum) throw new Error('No wallet')
-  return window.ethereum.request({
+  const chainId = (await window.ethereum.request({ method: 'eth_chainId' })) as string
+  if (chainId.toLowerCase() === ARC_CHAIN_ID) return
+  try {
+    await window.ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: ARC_CHAIN_ID }],
+    })
+  } catch (err: unknown) {
+    const code = (err as { code?: number })?.code
+    if (code === 4902 || code === -32603) {
+      await window.ethereum.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: ARC_CHAIN_ID,
+          chainName: 'Arc Testnet',
+          nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+          rpcUrls: ['https://rpc.testnet.arc.network'],
+        }],
+      })
+    } else {
+      throw err
+    }
+  }
+}
+
+async function sendTx(from: string, to: string, data: string): Promise<{ hash: string; success: boolean }> {
+  if (!window.ethereum) throw new Error('No wallet')
+  await ensureArcTestnet()
+  const hash = (await window.ethereum.request({
     method: 'eth_sendTransaction',
     params: [{ from, to, data }],
-  })
+  })) as string
+
+  // Poll for receipt (tx may take a few seconds to mine)
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 2000))
+    const receipt = (await window.ethereum.request({
+      method: 'eth_getTransactionReceipt',
+      params: [hash],
+    })) as { status: string } | null
+    if (receipt) {
+      return { hash, success: receipt.status === '0x1' }
+    }
+  }
+  return { hash, success: false } // timed out
 }
 
 interface Props {
@@ -78,11 +121,17 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
     setStatus(key, 'Confirm in wallet…')
     try {
       const data = encodeList(BigInt(r.tokenId), priceUnits, payToken)
-      const tx = await sendTx(userAddress, meantimeAddr, data)
-      setStatus(key, `Listed! tx: ${String(tx).slice(0, 18)}…`)
+      setStatus(key, 'Waiting for confirmation…')
+      const { hash, success } = await sendTx(userAddress, meantimeAddr, data)
+      if (success) {
+        setStatus(key, `Listed! tx: ${hash.slice(0, 18)}…`)
+      } else {
+        setStatus(key, `Tx reverted (already listed?): ${hash.slice(0, 18)}…`)
+      }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      setStatus(key, msg.includes('user rejected') ? 'Rejected.' : `Error: ${msg}`)
+      console.error('[list tx]', e)
+      const msg = e instanceof Error ? e.message : JSON.stringify(e)
+      setStatus(key, msg.includes('reject') ? 'Rejected.' : `Error: ${msg}`)
     } finally {
       setBusyKey(key, false)
     }
@@ -95,11 +144,17 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
     setStatus(key, 'Confirm in wallet…')
     try {
       const data = encodeDelist(BigInt(r.tokenId))
-      const tx = await sendTx(userAddress, meantimeAddr, data)
-      setStatus(key, `Delisted! tx: ${String(tx).slice(0, 18)}…`)
+      setStatus(key, 'Waiting for confirmation…')
+      const { hash, success } = await sendTx(userAddress, meantimeAddr, data)
+      if (success) {
+        setStatus(key, `Delisted! tx: ${hash.slice(0, 18)}…`)
+      } else {
+        setStatus(key, `Tx reverted: ${hash.slice(0, 18)}…`)
+      }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      setStatus(key, msg.includes('user rejected') ? 'Rejected.' : `Error: ${msg}`)
+      console.error('[delist tx]', e)
+      const msg = e instanceof Error ? e.message : JSON.stringify(e)
+      setStatus(key, msg.includes('reject') ? 'Rejected.' : `Error: ${msg}`)
     } finally {
       setBusyKey(key, false)
     }
@@ -112,14 +167,23 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
     setStatus(key, 'Step 1/2: approve…')
     try {
       const approveData = encodeApprove(meantimeAddr, BigInt(r.listing.reservePrice))
-      await sendTx(userAddress, r.listing.paymentToken, approveData)
+      const approve = await sendTx(userAddress, r.listing.paymentToken, approveData)
+      if (!approve.success) {
+        setStatus(key, `Approve reverted: ${approve.hash.slice(0, 18)}…`)
+        return
+      }
       setStatus(key, 'Step 2/2: fill…')
       const fillData = encodeFill(BigInt(r.tokenId))
-      const tx = await sendTx(userAddress, meantimeAddr, fillData)
-      setStatus(key, `Filled! tx: ${String(tx).slice(0, 18)}…`)
+      const { hash, success } = await sendTx(userAddress, meantimeAddr, fillData)
+      if (success) {
+        setStatus(key, `Filled! tx: ${hash.slice(0, 18)}…`)
+      } else {
+        setStatus(key, `Fill reverted: ${hash.slice(0, 18)}…`)
+      }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      setStatus(key, msg.includes('user rejected') ? 'Rejected.' : `Error: ${msg}`)
+      console.error('[fill tx]', e)
+      const msg = e instanceof Error ? e.message : JSON.stringify(e)
+      setStatus(key, msg.includes('reject') ? 'Rejected.' : `Error: ${msg}`)
     } finally {
       setBusyKey(key, false)
     }

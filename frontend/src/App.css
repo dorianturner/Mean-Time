@@ -362,35 +362,6 @@ section h2 {
 
 .list-price-input:focus { border-color: var(--accent); }
 
-.list-token-select {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 6px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border-2);
-  color: var(--text-bright);
-  cursor: pointer;
-  appearance: none;
-  outline: none;
-  min-width: 70px;
-}
-
-.list-token-select:focus { border-color: var(--accent); }
-
-.owner-hint {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-dim);
-  letter-spacing: 0.04em;
-}
-
-.list-form {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-}
-
 .tx-status {
   font-family: var(--font-mono);
   font-size: 11px;

@@ -41,7 +41,8 @@ export function buildCtx(): AppCtx {
   }
 
   const transport = http(rpcUrl)
-  const account   = privateKeyToAccount(privateKey as `0x${string}`)
+  const pk = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`
+  const account   = privateKeyToAccount(pk as `0x${string}`)
 
   return {
     publicClient: createPublicClient({ chain: arc, transport }),

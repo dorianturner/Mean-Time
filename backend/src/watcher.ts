@@ -20,16 +20,37 @@ export async function backfillStore(ctx: AppCtx, store: Store): Promise<void> {
   console.log('[backfill] Replaying historical events…')
 
   const latestBlock = await ctx.publicClient.getBlockNumber()
-  const fromBlock = latestBlock > 9999n ? latestBlock - 9999n : 0n
+
+  // Scan in chunks of 9000 blocks, going back up to ~50k blocks
+  const CHUNK = 9000n
+  const MAX_LOOKBACK = 50000n
+  const earliest = latestBlock > MAX_LOOKBACK ? latestBlock - MAX_LOOKBACK : 0n
+
+  // Helper: fetch events across all chunks
+  async function fetchAllEvents(eventName: string) {
+    const allLogs: any[] = []
+    let from = earliest
+    while (from <= latestBlock) {
+      const to = from + CHUNK - 1n > latestBlock ? latestBlock : from + CHUNK - 1n
+      try {
+        const logs = await ctx.publicClient.getContractEvents({
+          address,
+          abi: MEANTIME_ABI,
+          eventName: eventName as any,
+          fromBlock: from,
+          toBlock: to,
+        })
+        allLogs.push(...logs)
+      } catch (err: any) {
+        console.warn(`[backfill] chunk ${from}-${to} for ${eventName} failed: ${err.message?.slice(0, 80)}`)
+      }
+      from = to + 1n
+    }
+    return allLogs
+  }
 
   // Get all Minted events
-  const mintedLogs = await ctx.publicClient.getContractEvents({
-    address,
-    abi: MEANTIME_ABI,
-    eventName: 'Minted',
-    fromBlock,
-    toBlock: 'latest',
-  })
+  const mintedLogs = await fetchAllEvents('Minted')
 
   for (const log of mintedLogs) {
     const { tokenId, recipient, inboundToken, inboundAmount, cctpMessageHash } = log.args
@@ -46,13 +67,7 @@ export async function backfillStore(ctx: AppCtx, store: Store): Promise<void> {
   }
 
   // Apply listing events
-  const listedLogs = await ctx.publicClient.getContractEvents({
-    address,
-    abi: MEANTIME_ABI,
-    eventName: 'Listed',
-    fromBlock,
-    toBlock: 'latest',
-  })
+  const listedLogs = await fetchAllEvents('Listed')
   for (const log of listedLogs) {
     const { tokenId, reservePrice, paymentToken } = log.args
     if (tokenId === undefined) continue
@@ -62,13 +77,7 @@ export async function backfillStore(ctx: AppCtx, store: Store): Promise<void> {
   }
 
   // Apply delist events
-  const delistedLogs = await ctx.publicClient.getContractEvents({
-    address,
-    abi: MEANTIME_ABI,
-    eventName: 'Delisted',
-    fromBlock,
-    toBlock: 'latest',
-  })
+  const delistedLogs = await fetchAllEvents('Delisted')
   for (const log of delistedLogs) {
     const { tokenId } = log.args
     if (tokenId === undefined) continue
@@ -76,13 +85,7 @@ export async function backfillStore(ctx: AppCtx, store: Store): Promise<void> {
   }
 
   // Apply fill events
-  const filledLogs = await ctx.publicClient.getContractEvents({
-    address,
-    abi: MEANTIME_ABI,
-    eventName: 'Filled',
-    fromBlock,
-    toBlock: 'latest',
-  })
+  const filledLogs = await fetchAllEvents('Filled')
   for (const log of filledLogs) {
     const { tokenId, relayer } = log.args
     if (tokenId === undefined) continue
@@ -93,13 +96,7 @@ export async function backfillStore(ctx: AppCtx, store: Store): Promise<void> {
   }
 
   // Apply settle events (remove settled receivables)
-  const settledLogs = await ctx.publicClient.getContractEvents({
-    address,
-    abi: MEANTIME_ABI,
-    eventName: 'Settled',
-    fromBlock,
-    toBlock: 'latest',
-  })
+  const settledLogs = await fetchAllEvents('Settled')
   for (const log of settledLogs) {
     const { tokenId } = log.args
     if (tokenId === undefined) continue
