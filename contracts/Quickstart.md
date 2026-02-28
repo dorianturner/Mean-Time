@@ -3,33 +3,30 @@
 ## Prerequisites
 
 - Git
-- Bash (macOS/Linux/WSL)
-- An Arc testnet wallet with a funded private key (for deployment only)
+- Bash (macOS / Linux / WSL)
+- A funded Arc testnet wallet (for deployment only)
 
-Foundry does **not** need to be installed manually — `setup.sh` handles it.
+Foundry does **not** need to be pre-installed — `setup.sh` handles it.
 
 ---
 
 ## First-time setup
 
-Run this once from the repo root:
+Run once from the **repo root**:
 
 ```bash
 bash setup.sh
 ```
 
-This will:
-1. Install Foundry (`forge`, `cast`, `anvil`) to `~/.foundry/bin/`
-2. Pull all git submodules (`forge-std`, `openzeppelin-contracts`)
-3. Create a `.env` template at the repo root if one doesn't exist
-4. Build the contracts
+This installs Foundry, pulls all dependencies (`forge-std`, `openzeppelin-contracts`), and builds the contracts. If `forge` is not found after setup, open a new terminal or run `source ~/.bashrc`.
 
 ---
 
 ## Building
 
+From the repo root:
+
 ```bash
-cd contracts
 forge build
 ```
 
@@ -43,10 +40,9 @@ forge build --sizes
 
 ## Running tests
 
-Run the full test suite:
+From the repo root:
 
 ```bash
-cd contracts
 forge test -vvv
 ```
 
@@ -62,13 +58,13 @@ Run a single test function:
 forge test --match-test test_UpdateMessage -vvv
 ```
 
-The `-vvv` flag prints a full execution trace for failing tests. Use `-vv` for less output or omit entirely for a summary only.
+`-vvv` prints a full execution trace on failure. Omit for a summary only.
 
 ---
 
 ## Writing tests
 
-Test files live in `contracts/test/` and must end in `.t.sol`. Each test contract extends `forge-std/Test.sol`. Any function prefixed `test` is run as a test case; `setUp()` runs before each one.
+Test files live in `contracts/test/` and must end in `.t.sol`. Extend `forge-std/Test.sol`. Any function prefixed `test` is a test case; `setUp()` runs before each one.
 
 ```solidity
 // SPDX-License-Identifier: MIT
@@ -84,7 +80,7 @@ contract MyContractTest is Test {
         c = new MyContract();
     }
 
-    function test_Somebehaviour() public {
+    function test_SomeBehaviour() public {
         assertEq(c.value(), 42);
     }
 }
@@ -94,13 +90,13 @@ contract MyContractTest is Test {
 
 ## Formatting
 
-Check formatting (this is enforced in CI and will fail the build if not clean):
+Check formatting (enforced in CI):
 
 ```bash
 forge fmt --check
 ```
 
-Auto-fix formatting:
+Auto-fix:
 
 ```bash
 forge fmt
@@ -110,20 +106,18 @@ forge fmt
 
 ## Deploying to Arc testnet
 
-Fill in your private key in `.env` at the repo root:
+Add your private key to `.env` at the repo root:
 
 ```
 ARC_RPC_URL=https://rpc.testnet.arc.network
 PRIVATE_KEY=0xyour_key_here
 ```
 
-Then from the repo root:
+Then:
 
 ```bash
 source .env
-forge script contracts/scripts/DeployHello.s.sol:DeployHello \
-  --rpc-url $ARC_RPC_URL \
-  --broadcast
+forge script contracts/scripts/DeployHello.s.sol:DeployHello --rpc-url $ARC_RPC_URL --broadcast
 ```
 
 ---
@@ -131,12 +125,13 @@ forge script contracts/scripts/DeployHello.s.sol:DeployHello \
 ## Project layout
 
 ```
+foundry.toml              # Root Foundry config (run forge from here)
 contracts/
-├── src/          # Contract source files
-├── test/         # Forge test files (*.t.sol)
-├── scripts/      # Deployment scripts (*.s.sol)
-├── lib/          # Dependencies (forge-std, openzeppelin-contracts)
-└── foundry.toml  # Foundry config and remappings
+├── src/                  # Contract source files
+├── test/                 # Forge test files (*.t.sol)
+├── scripts/              # Deployment scripts (*.s.sol)
+├── lib/                  # Dependencies (managed via git submodules)
+└── foundry.toml          # Inner config (used when running forge from contracts/)
 ```
 
-The design spec for the full contract system is in `contracts/README.md`.
+The full contract design spec is in `contracts/README.md`.
