@@ -1,23 +1,23 @@
 import { useState } from 'react'
 import { ConnectButton }   from './components/ConnectButton.js'
 import { Marketplace }     from './components/Marketplace.js'
-import { BridgePanel }     from './components/BridgePanel.js'
+import { SendPanel }       from './components/SendPanel.js'
 import { useReceivables }  from './hooks/useReceivables.js'
 import { useTokenSymbols } from './hooks/useTokenSymbols.js'
 import { useWallet }       from './hooks/useWallet.js'
 import './App.css'
 
-const MEANTIME_ADDR = (import.meta.env.VITE_MEANTIME_ADDR ?? '0xff022c195F9e3bA7c16ac5DEE5c42579928eAC59') as `0x${string}`
-const USDC_ADDR     = import.meta.env.VITE_USDC_ADDR ?? '0xd082DEf36a0df2def3B64D09d4fa834A623A27C4'
-const EURC_ADDR     = import.meta.env.VITE_EURC_ADDR ?? '0x507442087DFE8e7664202FAc6b7E0E5c8366ae42'
+const MEANTIME_ADDR = (import.meta.env.VITE_MEANTIME_ADDR ?? '0x0769d1d0662894dC29cdADE1102411D2a059cc1c') as `0x${string}`
+const USDC_ADDR     = import.meta.env.VITE_USDC_ADDR ?? '0xBc7f753Da5b2050bdc7F1cc7DB9FEcF0368adA34'
+const EURC_ADDR     = import.meta.env.VITE_EURC_ADDR ?? '0xa1E57ECab96596b36bf60B0191b2D4fDDc554847'
 
-type Tab = 'marketplace' | 'bridge'
+type Tab = 'marketplace' | 'send'
 
 export default function App() {
   const [tab, setTab]              = useState<Tab>('marketplace')
   const { receivables, connected } = useReceivables()
   const tokenSymbol                = useTokenSymbols()
-  const { address, connect }       = useWallet()
+  const { address, chainId, connect, disconnect, switchNetwork } = useWallet()
 
   const activeListings   = receivables.filter(r => r.listing).length
   const totalReceivables = receivables.length
@@ -32,7 +32,7 @@ export default function App() {
         <div className="header-right">
           <span className="stat-chip">{totalReceivables} receivables</span>
           <span className="stat-chip accent">{activeListings} listings</span>
-          <ConnectButton address={address} connect={connect} />
+          <ConnectButton address={address} connect={connect} disconnect={disconnect} />
         </div>
       </header>
 
@@ -40,8 +40,8 @@ export default function App() {
         <button className={tab === 'marketplace' ? 'active' : ''} onClick={() => setTab('marketplace')}>
           Marketplace
         </button>
-        <button className={tab === 'bridge' ? 'active' : ''} onClick={() => setTab('bridge')}>
-          Bridge Simulator
+        <button className={tab === 'send' ? 'active' : ''} onClick={() => setTab('send')}>
+          Send
         </button>
       </nav>
 
@@ -56,8 +56,13 @@ export default function App() {
             eurcAddr={EURC_ADDR}
           />
         )}
-        {tab === 'bridge' && (
-          <BridgePanel usdcAddr={USDC_ADDR} eurcAddr={EURC_ADDR} />
+        {tab === 'send' && (
+          <SendPanel
+            meantimeAddr={MEANTIME_ADDR}
+            userAddress={address}
+            chainId={chainId}
+            switchNetwork={switchNetwork}
+          />
         )}
       </main>
     </div>

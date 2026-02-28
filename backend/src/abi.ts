@@ -81,6 +81,41 @@ export const MEANTIME_ABI = [
       { name: 'active',       type: 'bool'    },
     ],
   },
+  {
+    type: 'function',
+    name: 'tokenByMessageHash',
+    stateMutability: 'view',
+    inputs:  [{ name: 'messageHash', type: 'bytes32' }],
+    outputs: [{ name: 'tokenId', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'getReceivable',
+    stateMutability: 'view',
+    inputs:  [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [
+      { name: 'owner',                type: 'address' },
+      {
+        name: 'data', type: 'tuple',
+        components: [
+          { name: 'cctpMessageHash', type: 'bytes32' },
+          { name: 'inboundToken',    type: 'address' },
+          { name: 'inboundAmount',   type: 'uint256' },
+          { name: 'mintedAt',        type: 'uint256' },
+        ],
+      },
+      {
+        name: 'listing', type: 'tuple',
+        components: [
+          { name: 'reservePrice', type: 'uint256' },
+          { name: 'paymentToken', type: 'address' },
+          { name: 'active',       type: 'bool'    },
+        ],
+      },
+      { name: 'age',                  type: 'uint256' },
+      { name: 'estimatedSecondsLeft', type: 'uint256' },
+    ],
+  },
   // ── Write functions (bridge actions) ────────────────────────────────────────
   {
     type: 'function',

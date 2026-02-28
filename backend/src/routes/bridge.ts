@@ -1,14 +1,16 @@
-// Bridge-only endpoints: mint and settle.
+// Bridge-only endpoints: mint, settle, and initiate-cctp.
 // In the MVP the deployer acts as bridge, so these endpoints call the contract
 // using the PRIVATE_KEY from .env.  In production these would be replaced by
 // the CCTP MessageTransmitter integration.
 
 import { Router } from 'express'
-import { isAddress, isHex, parseUnits, keccak256, toBytes } from 'viem'
+import { isAddress, isHex, keccak256, toBytes } from 'viem'
 import { type AppCtx } from '../ctx.js'
+import { type Store } from '../store.js'
 import { MEANTIME_ABI } from '../abi.js'
+import { trackSepoliaTx } from '../sepoliaWatcher.js'
 
-export function buildBridgeRouter(ctx: AppCtx): Router {
+export function buildBridgeRouter(ctx: AppCtx, store: Store): Router {
   const router = Router()
 
   // POST /api/bridge/mint
@@ -80,6 +82,34 @@ export function buildBridgeRouter(ctx: AppCtx): Router {
       res.json({ txHash })
     } catch (err) {
       console.error('[bridge/settle]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  // POST /api/bridge/initiate-cctp
+  // Body: { txHash, recipient }
+  // Called by the frontend after depositForBurn on Sepolia.
+  // Extracts the CCTP message from the Sepolia tx receipt, mints an NFT on Arc,
+  // and kicks off attestation polling for automatic settlement.
+  router.post('/initiate-cctp', async (req, res) => {
+    try {
+      const { txHash, recipient } = req.body
+
+      if (!txHash || !isHex(txHash)) {
+        res.status(400).json({ error: 'txHash must be a 0x hex string' })
+        return
+      }
+
+      // Start tracking in background; respond immediately so UI doesn't time out
+      // during the Sepolia confirmation wait.
+      res.json({ ok: true, message: 'Tracking CCTP transfer — NFT will appear shortly.' })
+
+      // Background: wait for Sepolia receipt, mint on Arc, start attestation
+      trackSepoliaTx(ctx, store, txHash as `0x${string}`, recipient).catch(err => {
+        console.error('[bridge/initiate-cctp] Error:', err)
+      })
+    } catch (err) {
+      console.error('[bridge/initiate-cctp]', err)
       res.status(500).json({ error: String(err) })
     }
   })

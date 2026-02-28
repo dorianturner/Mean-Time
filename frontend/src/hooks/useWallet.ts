@@ -12,11 +12,11 @@ declare global {
 
 export function useWallet() {
   const [address, setAddress] = useState<string | null>(null)
+  const [chainId, setChainId] = useState<number | null>(null)
 
   useEffect(() => {
     if (!window.ethereum) return
 
-    // Read whichever account is already exposed (no popup)
     window.ethereum
       .request({ method: 'eth_accounts' })
       .then((accounts) => {
@@ -25,13 +25,26 @@ export function useWallet() {
       })
       .catch(() => {})
 
-    const handleChange = (accounts: unknown) => {
+    window.ethereum
+      .request({ method: 'eth_chainId' })
+      .then((id) => setChainId(parseInt(id as string, 16)))
+      .catch(() => {})
+
+    const handleAccountsChange = (accounts: unknown) => {
       const list = accounts as string[]
       setAddress(list[0]?.toLowerCase() ?? null)
     }
 
-    window.ethereum.on('accountsChanged', handleChange)
-    return () => window.ethereum?.removeListener('accountsChanged', handleChange)
+    const handleChainChange = (id: unknown) => {
+      setChainId(parseInt(id as string, 16))
+    }
+
+    window.ethereum.on('accountsChanged', handleAccountsChange)
+    window.ethereum.on('chainChanged', handleChainChange)
+    return () => {
+      window.ethereum?.removeListener('accountsChanged', handleAccountsChange)
+      window.ethereum?.removeListener('chainChanged', handleChainChange)
+    }
   }, [])
 
   const connect = async () => {
@@ -39,9 +52,44 @@ export function useWallet() {
       alert('No wallet found. Please install MetaMask.')
       return
     }
-    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }) as string[]
+    // wallet_requestPermissions always opens the account picker,
+    // even if MetaMask already has a connected account.
+    await window.ethereum.request({
+      method: 'wallet_requestPermissions',
+      params: [{ eth_accounts: {} }],
+    })
+    const accounts = await window.ethereum.request({ method: 'eth_accounts' }) as string[]
     setAddress(accounts[0]?.toLowerCase() ?? null)
   }
 
-  return { address, connect }
+  const disconnect = () => {
+    // MetaMask doesn't support programmatic disconnect; we just clear local state.
+    setAddress(null)
+  }
+
+  const switchNetwork = async (chainId: number) => {
+    if (!window.ethereum) return
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: `0x${chainId.toString(16)}` }],
+      })
+    } catch (err: unknown) {
+      // Chain not added yet — add it for Arc testnet
+      if ((err as { code?: number }).code === 4902 && chainId === 33111) {
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: '0x8157',
+            chainName: 'Arc Testnet',
+            nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+            rpcUrls: ['https://rpc.testnet.arc.network'],
+            blockExplorerUrls: [],
+          }],
+        })
+      }
+    }
+  }
+
+  return { address, chainId, connect, disconnect, switchNetwork }
 }

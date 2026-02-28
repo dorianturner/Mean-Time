@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { buildCtx }     from './ctx.js'
 import { createStore }  from './store.js'
 import { backfillStore, startWatcher } from './watcher.js'
+import { startSepoliaWatcher } from './sepoliaWatcher.js'
 import { createApp }    from './app.js'
 
 const PORT = Number(process.env.PORT ?? 3001)
@@ -9,9 +10,14 @@ const PORT = Number(process.env.PORT ?? 3001)
 const ctx   = buildCtx()
 const store = createStore()
 
-// Replay historical events, then start live watcher + HTTP server
-backfillStore(ctx, store).then(() => {
-  const stopWatcher = startWatcher(ctx, store)
+// Replay historical events, then start live watchers + HTTP server
+backfillStore(ctx, store)
+  .catch((err) => {
+    console.warn('[backfill] Failed (rate limit or RPC error) — starting without history:', err?.shortMessage ?? err)
+  })
+  .then(() => {
+  const stopArcWatcher     = startWatcher(ctx, store)
+  const stopSepoliaWatcher = startSepoliaWatcher(ctx, store)
 
   const app = createApp(ctx, store)
 
@@ -23,15 +29,17 @@ backfillStore(ctx, store).then(() => {
   })
 
   process.on('SIGTERM', () => {
-    stopWatcher()
+    stopArcWatcher()
+    stopSepoliaWatcher()
     server.close(() => process.exit(0))
   })
 
   process.on('SIGINT', () => {
-    stopWatcher()
+    stopArcWatcher()
+    stopSepoliaWatcher()
     server.close(() => process.exit(0))
   })
-}).catch((err) => {
-  console.error('Failed to start:', err)
-  process.exit(1)
-})
+  }).catch((err) => {
+    console.error('Failed to start:', err)
+    process.exit(1)
+  })

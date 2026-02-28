@@ -19,7 +19,7 @@ export function createApp(ctx: AppCtx, store: Store) {
   app.use('/api/receivables', buildReceivablesRouter(store))
   app.use('/api/tokens',      buildTokensRouter(ctx))
   app.use('/api/sse',         buildSseRouter(store))
-  app.use('/api/bridge',      buildBridgeRouter(ctx))
+  app.use('/api/bridge',      buildBridgeRouter(ctx, store))
 
   return app
 }
