@@ -2,6 +2,8 @@
 cache/
 out/
 
+deployments.json
+
 # Broadcast logs - keep production deployment records
 lib/
 contracts/lib/

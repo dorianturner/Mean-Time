@@ -8,3 +8,4 @@ remappings = [
     "@openzeppelin/contracts/=contracts/lib/openzeppelin-contracts/contracts/",
     "forge-std/=contracts/lib/forge-std/src/",
 ]
+fs_permissions = [{ access = "write", path = "./deployments.json" }]
