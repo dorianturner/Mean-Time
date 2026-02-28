@@ -160,6 +160,18 @@ header::after {
   background: rgba(240, 160, 48, 0.05);
 }
 
+/* Connected wallet address display */
+.wallet-address {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--green);
+  padding: 7px 12px;
+  border: 1px solid var(--green-dim);
+  background: rgba(31, 204, 116, 0.05);
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+}
+
 /* Connect button */
 .connect-btn {
   font-family: var(--font-ui);
@@ -334,18 +346,10 @@ section h2 {
   background: rgba(240,160,48,0.06);
 }
 
-/* ── List form ──────────────────────────────────────────────────────────────── */
+/* ── Marketplace card extras ────────────────────────────────────────────────── */
 
-.list-form {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.list-form input {
+.list-price-input {
   flex: 1;
-  min-width: 140px;
   font-family: var(--font-mono);
   font-size: 13px;
   padding: 6px 10px;
@@ -353,9 +357,20 @@ section h2 {
   border: 1px solid var(--border-2);
   color: var(--text-bright);
   outline: none;
+  min-width: 0;
 }
 
-.list-form input:focus { border-color: var(--accent); }
+.list-price-input:focus { border-color: var(--accent); }
+
+.tx-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  word-break: break-all;
+}
 
 /* ── Marketplace ────────────────────────────────────────────────────────────── */
 
