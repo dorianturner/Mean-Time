@@ -67,5 +67,15 @@ export function useReceivables() {
     return () => es.close()
   }, [])
 
-  return { receivables: Array.from(receivables.values()), connected }
+  // Optimistic local update — apply immediately without waiting for SSE
+  const updateReceivable = (tokenId: string, patch: Partial<Receivable>) => {
+    setReceivables(prev => {
+      const next = new Map(prev)
+      const r = next.get(tokenId)
+      if (r) next.set(tokenId, { ...r, ...patch })
+      return next
+    })
+  }
+
+  return { receivables: Array.from(receivables.values()), connected, updateReceivable }
 }

@@ -22,7 +22,7 @@ function encodeApprove(spender: string, amount: bigint): string {
 function encodeDepositForBurn(
   amount: bigint,
   destDomain: number,
-  mintRecipient: string,  // already 32-byte hex (no 0x)
+  mintRecipient: string,
   burnToken: string,
 ): string {
   const selector = '0x6fd3504e'
@@ -46,6 +46,8 @@ interface Props {
   meantimeAddr: string
   userAddress:  string | null
   chainId:      number | null
+  usdcAddr:     string
+  eurcAddr:     string
   switchNetwork: (chainId: number) => Promise<void>
 }
 
@@ -82,8 +84,6 @@ export function SendPanel({ meantimeAddr, userAddress, chainId, switchNetwork }:
     if (!amount || Number(amount) <= 0) { setStatus('Enter a valid amount.'); return }
 
     const units = BigInt(Math.round(Number(amount) * 1e6))
-
-    // mintRecipient = MeanTime address, padded to 32 bytes (no 0x prefix)
     const mintRecipient = meantimeAddr.replace('0x', '').padStart(64, '0')
 
     try {
@@ -132,9 +132,10 @@ export function SendPanel({ meantimeAddr, userAddress, chainId, switchNetwork }:
   return (
     <div className="send-panel">
       <h2>Send USDC → Arc</h2>
+
       <p className="hint">
-        Burns Sepolia USDC via CCTP v1. A receivable NFT is minted on Arc instantly.
-        The recipient can hold it or trade it on the marketplace. Settlement arrives in ~14 minutes.
+        Burns Sepolia USDC via CCTP v1 and mints a receivable NFT on Arc.
+        Settlement arrives in ~14 minutes via Circle attestation.
       </p>
 
       {!userAddress && (

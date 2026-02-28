@@ -76,12 +76,12 @@ export function useWallet() {
       })
     } catch (err: unknown) {
       // Chain not added yet — add it for Arc testnet
-      if ((err as { code?: number }).code === 4902 && chainId === 33111) {
+      if ((err as { code?: number }).code === 4902 && chainId === 5042002) {
         await window.ethereum.request({
           method: 'wallet_addEthereumChain',
           params: [{
-            chainId: '0x8157',
-            chainName: 'Arc Testnet',
+            chainId: '0x4cef52',
+            chainName: 'Arc Network Testnet',
             nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
             rpcUrls: ['https://rpc.testnet.arc.network'],
             blockExplorerUrls: [],

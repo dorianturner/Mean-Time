@@ -35,16 +35,48 @@ async function sendTx(from: string, to: string, data: string) {
   })
 }
 
+/** Poll until a tx is mined successfully or reverted. Throws on revert/drop/cancel. */
+async function waitForReceipt(txHash: string, timeoutMs = 60_000): Promise<void> {
+  if (!window.ethereum) throw new Error('No wallet')
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    // Check receipt first
+    const receipt = await window.ethereum.request({
+      method: 'eth_getTransactionReceipt',
+      params: [txHash],
+    }) as { status: string } | null
+    if (receipt) {
+      if (receipt.status === '0x1') return          // success
+      throw new Error('Transaction reverted on-chain')
+    }
+    // Check if the tx was dropped/cancelled (no longer in mempool)
+    const tx = await window.ethereum.request({
+      method: 'eth_getTransactionByHash',
+      params: [txHash],
+    })
+    if (tx === null) {
+      throw new Error('Transaction was cancelled or dropped')
+    }
+    await new Promise(r => setTimeout(r, 2000))     // poll every 2s
+  }
+  throw new Error('Transaction timed out — check wallet')
+}
+
 interface Props {
   receivables:  Receivable[]
   meantimeAddr: `0x${string}`
   tokenSymbol:  (addr: string) => string
   userAddress:  string | null
+  chainId:      number | null
   usdcAddr:     string
   eurcAddr:     string
+  updateReceivable: (tokenId: string, patch: Partial<Receivable>) => void
+  switchNetwork: (chainId: number) => Promise<void>
 }
 
-export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddress, usdcAddr, eurcAddr }: Props) {
+const ARC_CHAIN_ID = 5042002
+
+export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddress, chainId, usdcAddr, eurcAddr, updateReceivable, switchNetwork }: Props) {
   const [listPrice,   setListPrice]   = useState<Record<string, string>>({})
   const [listPayTok,  setListPayTok]  = useState<Record<string, string>>({})
   const [txStatus,    setTxStatus]    = useState<Record<string, string>>({})
@@ -68,6 +100,19 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
   const setStatus = (key: string, msg: string) => setTxStatus(s => ({ ...s, [key]: msg }))
   const setBusyKey = (key: string, val: boolean) => setBusy(s => ({ ...s, [key]: val }))
 
+  const onArc = chainId === ARC_CHAIN_ID
+
+  /** Ensure wallet is on Arc before any on-chain action. Returns false if switch failed. */
+  const ensureArc = async (): Promise<boolean> => {
+    if (onArc) return true
+    try {
+      await switchNetwork(ARC_CHAIN_ID)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   const handleList = async (r: Receivable) => {
     const price = listPrice[r.tokenId]
     if (!price || !userAddress) return
@@ -77,8 +122,12 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
     setBusyKey(key, true)
     setStatus(key, 'Confirm in wallet…')
     try {
+      if (!await ensureArc()) { setStatus(key, 'Switch to Arc to list.'); return }
       const data = encodeList(BigInt(r.tokenId), priceUnits, payToken)
       const tx = await sendTx(userAddress, meantimeAddr, data)
+      setStatus(key, `Confirming tx ${String(tx).slice(0, 18)}…`)
+      await waitForReceipt(String(tx))
+      updateReceivable(r.tokenId, { listing: { reservePrice: String(priceUnits), paymentToken: payToken } })
       setStatus(key, `Listed! tx: ${String(tx).slice(0, 18)}…`)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -94,8 +143,12 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
     setBusyKey(key, true)
     setStatus(key, 'Confirm in wallet…')
     try {
+      if (!await ensureArc()) { setStatus(key, 'Switch to Arc to delist.'); return }
       const data = encodeDelist(BigInt(r.tokenId))
       const tx = await sendTx(userAddress, meantimeAddr, data)
+      setStatus(key, `Confirming tx ${String(tx).slice(0, 18)}…`)
+      await waitForReceipt(String(tx))
+      updateReceivable(r.tokenId, { listing: null })
       setStatus(key, `Delisted! tx: ${String(tx).slice(0, 18)}…`)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -109,13 +162,20 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
     if (!r.listing || !userAddress) return
     const key = `fill-${r.tokenId}`
     setBusyKey(key, true)
-    setStatus(key, 'Step 1/2: approve…')
+    setStatus(key, 'Step 1/3: switch to Arc…')
     try {
+      if (!await ensureArc()) { setStatus(key, 'Switch to Arc to fill.'); return }
+      setStatus(key, 'Step 1/2: approve payment token…')
       const approveData = encodeApprove(meantimeAddr, BigInt(r.listing.reservePrice))
-      await sendTx(userAddress, r.listing.paymentToken, approveData)
-      setStatus(key, 'Step 2/2: fill…')
+      const approveTx = await sendTx(userAddress, r.listing.paymentToken, approveData)
+      setStatus(key, 'Waiting for approve to confirm…')
+      await waitForReceipt(String(approveTx))
+      setStatus(key, 'Step 2/2: fill listing…')
       const fillData = encodeFill(BigInt(r.tokenId))
       const tx = await sendTx(userAddress, meantimeAddr, fillData)
+      setStatus(key, `Confirming tx ${String(tx).slice(0, 18)}…`)
+      await waitForReceipt(String(tx))
+      if (userAddress) updateReceivable(r.tokenId, { listing: null, beneficialOwner: userAddress })
       setStatus(key, `Filled! tx: ${String(tx).slice(0, 18)}…`)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)

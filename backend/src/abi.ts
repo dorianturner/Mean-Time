@@ -38,6 +38,7 @@ export const MEANTIME_ABI = [
       { name: 'seller',       type: 'address', indexed: true  },
       { name: 'paymentToken', type: 'address', indexed: false },
       { name: 'amount',       type: 'uint256', indexed: false },
+      { name: 'filledAt',     type: 'uint256', indexed: false },
     ],
   },
   {
@@ -81,41 +82,6 @@ export const MEANTIME_ABI = [
       { name: 'active',       type: 'bool'    },
     ],
   },
-  {
-    type: 'function',
-    name: 'tokenByMessageHash',
-    stateMutability: 'view',
-    inputs:  [{ name: 'messageHash', type: 'bytes32' }],
-    outputs: [{ name: 'tokenId', type: 'uint256' }],
-  },
-  {
-    type: 'function',
-    name: 'getReceivable',
-    stateMutability: 'view',
-    inputs:  [{ name: 'tokenId', type: 'uint256' }],
-    outputs: [
-      { name: 'owner',                type: 'address' },
-      {
-        name: 'data', type: 'tuple',
-        components: [
-          { name: 'cctpMessageHash', type: 'bytes32' },
-          { name: 'inboundToken',    type: 'address' },
-          { name: 'inboundAmount',   type: 'uint256' },
-          { name: 'mintedAt',        type: 'uint256' },
-        ],
-      },
-      {
-        name: 'listing', type: 'tuple',
-        components: [
-          { name: 'reservePrice', type: 'uint256' },
-          { name: 'paymentToken', type: 'address' },
-          { name: 'active',       type: 'bool'    },
-        ],
-      },
-      { name: 'age',                  type: 'uint256' },
-      { name: 'estimatedSecondsLeft', type: 'uint256' },
-    ],
-  },
   // ── Write functions (bridge actions) ────────────────────────────────────────
   {
     type: 'function',
@@ -134,6 +100,19 @@ export const MEANTIME_ABI = [
     name: 'settle',
     stateMutability: 'nonpayable',
     inputs:  [{ name: 'cctpMessageHash', type: 'bytes32' }],
+    outputs: [],
+  },
+] as const
+
+export const ERC20_MINT_ABI = [
+  {
+    type: 'function',
+    name: 'mint',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to',     type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
     outputs: [],
   },
 ] as const
