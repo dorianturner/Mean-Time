@@ -1,100 +1,162 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.33;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-interface IMockUSYC {
-    function deposit(uint256 amount) external;
-    function withdraw(uint256 shares) external;
-}
+/// @title MeanTime — Tokenised CCTP receivables
+/// @notice Every CCTP inbound transfer is represented as an NFT held by this contract.
+///         Economic ownership is tracked via beneficialOwner. The NFT never leaves the contract.
+contract MeanTime is ERC721 {
+    // ── Storage ────────────────────────────────────────────────────────────────
 
-contract ArcVelocity is ERC721, Ownable {
-    IERC20 public usdc;
-    IMockUSYC public usyc;
-    
-    uint256 public nextTokenId;
-    
-    struct TransferClaim {
-        uint256 amount;
-        bytes32 cctpNonce;
-        uint256 expiry;
-        bool settled;
-        address originalSender;
+    /// @notice The authorised bridge address — the only address that can call mint().
+    address public bridge;
+
+    /// @dev Start at 1 so that tokenId 0 is a reliable sentinel for "not found"
+    ///      in the tokenByMessageHash mapping.
+    uint256 private _nextTokenId = 1;
+
+    struct NFTData {
+        bytes32 cctpMessageHash; // links this NFT to a specific CCTP transfer
+        address inboundToken;    // the token that will arrive at attestation (e.g. USDC, EURC)
+        uint256 inboundAmount;   // face value, in units of inboundToken
+        uint256 mintedAt;        // block.timestamp at mint — proxy for attestation progress
     }
 
-    mapping(uint256 => TransferClaim) public claims;
-    mapping(bytes32 => uint256) public nonceToId;
+    struct Listing {
+        uint256 reservePrice; // minimum amount seller will accept, in units of paymentToken
+        address paymentToken; // any ERC20 the seller wants in return
+        bool active;
+    }
 
-    event ClaimMinted(uint256 indexed tokenId, address indexed sender, uint256 amount, bytes32 nonce);
-    event ClaimSettled(uint256 indexed tokenId, address indexed receiver, uint256 amount);
+    mapping(uint256 tokenId => NFTData) public nftData;
+    mapping(uint256 tokenId => Listing) public listings;
+    mapping(uint256 tokenId => address) public beneficialOwner;
+    mapping(bytes32 messageHash => uint256 tokenId) public tokenByMessageHash;
 
-    constructor(address _usdc, address _usyc) 
-        ERC721("ArcVelocity Transfer Claim", "AVTC") 
-        Ownable(msg.sender) 
+    // ── Events ─────────────────────────────────────────────────────────────────
+
+    event Minted(
+        uint256 indexed tokenId,
+        address indexed recipient,
+        address inboundToken,
+        uint256 inboundAmount,
+        bytes32 cctpMessageHash
+    );
+    event Listed(uint256 indexed tokenId, uint256 reservePrice, address paymentToken, uint256 listedAt);
+    event Delisted(uint256 indexed tokenId);
+    event Filled(
+        uint256 indexed tokenId,
+        address indexed relayer,
+        address indexed seller,
+        address paymentToken,
+        uint256 amount
+    );
+    event Settled(uint256 indexed tokenId, address indexed recipient, address inboundToken, uint256 amount);
+
+    // ── Constructor ────────────────────────────────────────────────────────────
+
+    constructor(address _bridge) ERC721("MeanTime Receivable", "MTR") {
+        bridge = _bridge;
+    }
+
+    // ── Modifiers ──────────────────────────────────────────────────────────────
+
+    modifier onlyBridge() {
+        require(msg.sender == bridge, "not bridge");
+        _;
+    }
+
+    // ── Core functions ─────────────────────────────────────────────────────────
+
+    /// @notice Called by the bridge when a CCTP burn is detected on the source chain.
+    ///         Mints an NFT representing the incoming receivable to address(this).
+    ///         The beneficial owner (recipient of inboundToken at settlement) is set to `recipient`.
+    function mint(bytes32 cctpMessageHash, address inboundToken, uint256 inboundAmount, address recipient)
+        external
+        onlyBridge
+        returns (uint256 tokenId)
     {
-        usdc = IERC20(_usdc);
-        usyc = IMockUSYC(_usyc);
+        require(tokenByMessageHash[cctpMessageHash] == 0, "already minted");
+        require(inboundToken != address(0), "invalid token");
+        require(inboundAmount > 0, "invalid amount");
+        require(recipient != address(0), "invalid recipient");
+
+        tokenId = _nextTokenId++;
+        _mint(address(this), tokenId);
+
+        nftData[tokenId] =
+            NFTData({cctpMessageHash: cctpMessageHash, inboundToken: inboundToken, inboundAmount: inboundAmount, mintedAt: block.timestamp});
+
+        beneficialOwner[tokenId] = recipient;
+        tokenByMessageHash[cctpMessageHash] = tokenId;
+
+        emit Minted(tokenId, recipient, inboundToken, inboundAmount, cctpMessageHash);
     }
 
-    /**
-     * @notice Mints an NFT representing an "in-flight" USDC transfer.
-     * @param _amount The amount of USDC burned on the source chain.
-     * @param _nonce The CCTP nonce generated during the burn.
-     */
-    function initiateTransfer(uint256 _amount, bytes32 _nonce) external {
-        uint256 tokenId = nextTokenId++;
-        
-        claims[tokenId] = TransferClaim({
-            amount: _amount,
-            cctpNonce: _nonce,
-            expiry: block.timestamp + 24 hours,
-            settled: false,
-            originalSender: msg.sender
-        });
+    /// @notice List the receivable NFT for sale. The seller specifies the minimum price
+    ///         and which token they want to receive. The NFT stays in the contract.
+    function list(uint256 tokenId, uint256 reservePrice, address paymentToken) external {
+        require(beneficialOwner[tokenId] == msg.sender, "not beneficial owner");
+        require(!listings[tokenId].active, "already listed");
+        require(reservePrice > 0, "invalid price");
+        require(paymentToken != address(0), "invalid token");
 
-        nonceToId[_nonce] = tokenId;
+        listings[tokenId] = Listing({reservePrice: reservePrice, paymentToken: paymentToken, active: true});
 
-        _safeMint(msg.sender, tokenId);
-        emit ClaimMinted(tokenId, msg.sender, _amount, _nonce);
+        emit Listed(tokenId, reservePrice, paymentToken, block.timestamp);
     }
 
-    /**
-     * @notice Settles the claim once the CCTP attestation arrives.
-     * @dev In a production environment, this would be called by the CCTP Relayer.
-     * @param _tokenId The ID of the NFT to settle.
-     */
-    function settleTransfer(uint256 _tokenId) external {
-        TransferClaim storage claim = claims[_tokenId];
-        require(!claim.settled, "Already settled");
-        require(ownerOf(_tokenId) != address(0), "Invalid token");
+    /// @notice Remove the listing. Beneficial ownership is unchanged.
+    function delist(uint256 tokenId) external {
+        require(beneficialOwner[tokenId] == msg.sender, "not beneficial owner");
+        require(listings[tokenId].active, "not listed");
 
-        address currentHolder = ownerOf(_tokenId);
-        uint256 payoutAmount = claim.amount;
+        delete listings[tokenId];
 
-        // Mark as settled and burn the NFT
-        claim.settled = true;
-        _burn(_tokenId);
-
-        // In the real version, we would verify the CCTP message here.
-        // For the MVP, we assume the caller provides the correct USDC to this contract.
-        require(usdc.transfer(currentHolder, payoutAmount), "Transfer failed");
-
-        emit ClaimSettled(_tokenId, currentHolder, payoutAmount);
+        emit Delisted(tokenId);
     }
 
-    /**
-     * @notice Optional: Logic to buy the NFT at a discount directly through the contract.
-     */
-    function buyClaim(uint256 _tokenId, uint256 _price) external {
-        require(usdc.balanceOf(msg.sender) >= _price, "Insufficient USDC");
-        address seller = ownerOf(_tokenId);
-        
-        // Transfer USDC from Buyer to Seller
-        usdc.transferFrom(msg.sender, seller, _price);
-        
-        // Transfer the NFT (The "Claim") to the Buyer
-        _transfer(seller, msg.sender, _tokenId);
+    /// @notice Relayer fills the listing. Sends paymentToken to the seller at reservePrice.
+    ///         Relayer becomes the new beneficial owner and will receive inboundToken at settlement.
+    ///         State is updated before token transfer for reentrancy safety.
+    function fill(uint256 tokenId) external {
+        Listing memory listing = listings[tokenId];
+        require(listing.active, "not listed");
+
+        address seller = beneficialOwner[tokenId];
+
+        // state changes before transfers
+        delete listings[tokenId];
+        beneficialOwner[tokenId] = msg.sender;
+
+        IERC20(listing.paymentToken).transferFrom(msg.sender, seller, listing.reservePrice);
+
+        emit Filled(tokenId, msg.sender, seller, listing.paymentToken, listing.reservePrice);
+    }
+
+    /// @notice Permissionless. Pays out inboundToken to the current beneficial owner and burns the NFT.
+    ///         The contract must hold sufficient inboundToken (routed here by the CCTP bridge).
+    ///         Handles the edge case where the NFT is still listed — the listing is cleared and
+    ///         the seller receives the inbound tokens as if they had held to maturity.
+    function settle(bytes32 cctpMessageHash) external {
+        uint256 tokenId = tokenByMessageHash[cctpMessageHash];
+        require(tokenId != 0, "unknown transfer");
+
+        address recipient = beneficialOwner[tokenId];
+        address token = nftData[tokenId].inboundToken;
+        uint256 amount = nftData[tokenId].inboundAmount;
+
+        // clean up all state before transfer
+        delete beneficialOwner[tokenId];
+        delete nftData[tokenId];
+        delete listings[tokenId]; // handles: attestation arrives while NFT is still listed
+        delete tokenByMessageHash[cctpMessageHash];
+        _burn(tokenId);
+
+        IERC20(token).transfer(recipient, amount);
+
+        emit Settled(tokenId, recipient, token, amount);
     }
 }
