@@ -3,8 +3,9 @@ cache/
 out/
 
 # Broadcast logs - keep production deployment records
-broadcast/
 lib/
+contracts/lib/
+broadcast/
 
 # Environment variables (NEVER commit private keys!)
 .env

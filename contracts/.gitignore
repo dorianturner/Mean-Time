@@ -2,6 +2,9 @@
 cache/
 out/
 
+# Dependencies — managed as git submodules, contents should not be committed
+lib/
+
 # Ignores development broadcast logs
 !/broadcast
 /broadcast/*/31337/
