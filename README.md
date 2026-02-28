@@ -44,7 +44,7 @@ Arc: InstantSettle mints NFT (the receivable)
          └─── Receiver lists NFT at EURC price
                     │
                     ▼
-              Relayer fills order — receiver gets EURC instantly (< 350ms)
+              Relayer fills order — receiver gets EURC instantly (< 500ms)
                     │
                     ▼
               Circle attestation arrives — contract mints USDC to NFT holder (Relayer)
