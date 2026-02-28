@@ -1,9 +1,113 @@
 // Watches MeanTime contract events and keeps the Store in sync.
+// backfillStore() replays all historical events so nothing is lost across restarts.
+// startWatcher() subscribes to live events going forward.
 // Returns a cleanup function that unsubscribes all watchers.
 
 import { type AppCtx } from './ctx.js'
 import { type Store } from './store.js'
 import { MEANTIME_ABI } from './abi.js'
+
+/**
+ * Replay all past Minted/Listed/Delisted/Filled/Settled events from the chain
+ * and rebuild the in-memory store. Call this BEFORE startWatcher().
+ *
+ * The RPC limits eth_getLogs to 10,000 blocks, so we scan from (latest - 9999)
+ * which covers ~2.8 hours at 1-second blocks — more than enough for a testnet.
+ */
+export async function backfillStore(ctx: AppCtx, store: Store): Promise<void> {
+  const address = ctx.addresses.meantime
+
+  console.log('[backfill] Replaying historical events…')
+
+  const latestBlock = await ctx.publicClient.getBlockNumber()
+  const fromBlock = latestBlock > 9999n ? latestBlock - 9999n : 0n
+
+  // Get all Minted events
+  const mintedLogs = await ctx.publicClient.getContractEvents({
+    address,
+    abi: MEANTIME_ABI,
+    eventName: 'Minted',
+    fromBlock,
+    toBlock: 'latest',
+  })
+
+  for (const log of mintedLogs) {
+    const { tokenId, recipient, inboundToken, inboundAmount, cctpMessageHash } = log.args
+    if (tokenId === undefined) continue
+    store.upsert({
+      tokenId,
+      cctpMessageHash: cctpMessageHash as `0x${string}`,
+      inboundToken:    inboundToken    as `0x${string}`,
+      inboundAmount:   inboundAmount   as bigint,
+      mintedAt:        BigInt(log.blockNumber ?? 0n),
+      beneficialOwner: recipient       as `0x${string}`,
+      listing:         null,
+    })
+  }
+
+  // Apply listing events
+  const listedLogs = await ctx.publicClient.getContractEvents({
+    address,
+    abi: MEANTIME_ABI,
+    eventName: 'Listed',
+    fromBlock,
+    toBlock: 'latest',
+  })
+  for (const log of listedLogs) {
+    const { tokenId, reservePrice, paymentToken } = log.args
+    if (tokenId === undefined) continue
+    store.patch(tokenId, {
+      listing: { reservePrice: reservePrice as bigint, paymentToken: paymentToken as `0x${string}` },
+    })
+  }
+
+  // Apply delist events
+  const delistedLogs = await ctx.publicClient.getContractEvents({
+    address,
+    abi: MEANTIME_ABI,
+    eventName: 'Delisted',
+    fromBlock,
+    toBlock: 'latest',
+  })
+  for (const log of delistedLogs) {
+    const { tokenId } = log.args
+    if (tokenId === undefined) continue
+    store.patch(tokenId, { listing: null })
+  }
+
+  // Apply fill events
+  const filledLogs = await ctx.publicClient.getContractEvents({
+    address,
+    abi: MEANTIME_ABI,
+    eventName: 'Filled',
+    fromBlock,
+    toBlock: 'latest',
+  })
+  for (const log of filledLogs) {
+    const { tokenId, relayer } = log.args
+    if (tokenId === undefined) continue
+    store.patch(tokenId, {
+      listing:         null,
+      beneficialOwner: relayer as `0x${string}`,
+    })
+  }
+
+  // Apply settle events (remove settled receivables)
+  const settledLogs = await ctx.publicClient.getContractEvents({
+    address,
+    abi: MEANTIME_ABI,
+    eventName: 'Settled',
+    fromBlock,
+    toBlock: 'latest',
+  })
+  for (const log of settledLogs) {
+    const { tokenId } = log.args
+    if (tokenId === undefined) continue
+    store.remove(tokenId)
+  }
+
+  console.log(`[backfill] Done — ${store.snapshot().length} active receivable(s)`)
+}
 
 export function startWatcher(ctx: AppCtx, store: Store): () => void {
   const address = ctx.addresses.meantime

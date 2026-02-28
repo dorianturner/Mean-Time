@@ -3,15 +3,21 @@ import type { Receivable } from '../types.js'
 
 // Encode a function call: list(uint256,uint256,address)
 function encodeList(tokenId: bigint, price: bigint, token: string): string {
-  const sig = '0xf085bd5c' // keccak256('list(uint256,uint256,address)')[0:4]
+  const sig = '0x704ecd0e' // keccak256('list(uint256,uint256,address)')[0:4]
   const pad  = (n: bigint) => n.toString(16).padStart(64, '0')
   const padA = (a: string) => a.replace('0x', '').padStart(64, '0')
   return sig + pad(tokenId) + pad(price) + padA(token)
 }
 
+// Encode delist(uint256)
+function encodeDelist(tokenId: bigint): string {
+  const sig = '0x964bc33f' // keccak256('delist(uint256)')[0:4]
+  return sig + tokenId.toString(16).padStart(64, '0')
+}
+
 // Encode fill(uint256)
 function encodeFill(tokenId: bigint): string {
-  const sig = '0x4bda7562' // keccak256('fill(uint256)')[0:4]
+  const sig = '0x3fda5389' // keccak256('fill(uint256)')[0:4]
   return sig + tokenId.toString(16).padStart(64, '0')
 }
 
@@ -34,18 +40,30 @@ interface Props {
   meantimeAddr: `0x${string}`
   tokenSymbol:  (addr: string) => string
   userAddress:  string | null
+  usdcAddr:     string
+  eurcAddr:     string
 }
 
-export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddress }: Props) {
-  const [listPrice, setListPrice] = useState<Record<string, string>>({})
-  const [txStatus,  setTxStatus]  = useState<Record<string, string>>({})
-  const [busy,      setBusy]      = useState<Record<string, boolean>>({})
+export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddress, usdcAddr, eurcAddr }: Props) {
+  const [listPrice,   setListPrice]   = useState<Record<string, string>>({})
+  const [listPayTok,  setListPayTok]  = useState<Record<string, string>>({})
+  const [txStatus,    setTxStatus]    = useState<Record<string, string>>({})
+  const [busy,        setBusy]        = useState<Record<string, boolean>>({})
 
   // Only show receivables the connected wallet owns and that are not yet listed
   const mine   = userAddress
     ? receivables.filter(r => !r.listing && r.beneficialOwner.toLowerCase() === userAddress)
     : []
+  const myListed = userAddress
+    ? receivables.filter(r => r.listing && r.beneficialOwner.toLowerCase() === userAddress)
+    : []
   const listed = receivables.filter(r => r.listing)
+  // Unlisted receivables owned by others (or all unlisted if not connected)
+  const othersUnlisted = receivables.filter(r => {
+    if (r.listing) return false
+    if (userAddress && r.beneficialOwner.toLowerCase() === userAddress) return false
+    return true
+  })
 
   const setStatus = (key: string, msg: string) => setTxStatus(s => ({ ...s, [key]: msg }))
   const setBusyKey = (key: string, val: boolean) => setBusy(s => ({ ...s, [key]: val }))
@@ -54,15 +72,31 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
     const price = listPrice[r.tokenId]
     if (!price || !userAddress) return
     const priceUnits = BigInt(Math.round(Number(price) * 1e6))
+    const payToken = listPayTok[r.tokenId] || eurcAddr
     const key = `list-${r.tokenId}`
     setBusyKey(key, true)
     setStatus(key, 'Confirm in wallet…')
     try {
-      // Use EURC as payment token by default
-      const eurc = '0xBE756BAB8aC57C89B07Bb900cE9D8E97a61D622F'
-      const data = encodeList(BigInt(r.tokenId), priceUnits, eurc)
+      const data = encodeList(BigInt(r.tokenId), priceUnits, payToken)
       const tx = await sendTx(userAddress, meantimeAddr, data)
       setStatus(key, `Listed! tx: ${String(tx).slice(0, 18)}…`)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setStatus(key, msg.includes('user rejected') ? 'Rejected.' : `Error: ${msg}`)
+    } finally {
+      setBusyKey(key, false)
+    }
+  }
+
+  const handleDelist = async (r: Receivable) => {
+    if (!userAddress) return
+    const key = `delist-${r.tokenId}`
+    setBusyKey(key, true)
+    setStatus(key, 'Confirm in wallet…')
+    try {
+      const data = encodeDelist(BigInt(r.tokenId))
+      const tx = await sendTx(userAddress, meantimeAddr, data)
+      setStatus(key, `Delisted! tx: ${String(tx).slice(0, 18)}…`)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       setStatus(key, msg.includes('user rejected') ? 'Rejected.' : `Error: ${msg}`)
@@ -109,15 +143,50 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
                   <input
                     type="number"
                     className="list-price-input"
-                    placeholder="Price in EURC (e.g. 995.00)"
+                    placeholder="Price (e.g. 995.00)"
                     value={listPrice[r.tokenId] ?? ''}
                     onChange={e => setListPrice(p => ({ ...p, [r.tokenId]: e.target.value }))}
                   />
+                  <select
+                    className="list-token-select"
+                    value={listPayTok[r.tokenId] || eurcAddr}
+                    onChange={e => setListPayTok(p => ({ ...p, [r.tokenId]: e.target.value }))}
+                  >
+                    <option value={usdcAddr}>USDC</option>
+                    <option value={eurcAddr}>EURC</option>
+                  </select>
                   <button
                     disabled={busy[key] || !listPrice[r.tokenId]}
                     onClick={() => handleList(r)}
                   >
                     {busy[key] ? 'Listing…' : 'List'}
+                  </button>
+                </div>
+                {txStatus[key] && <div className="tx-status">{txStatus[key]}</div>}
+              </div>
+            )
+          })}
+        </section>
+      )}
+
+      {/* My active listings — can delist */}
+      {myListed.length > 0 && (
+        <section>
+          <h2>My Listings</h2>
+          {myListed.map(r => {
+            const key = `delist-${r.tokenId}`
+            return (
+              <div key={r.tokenId} className="card">
+                <div className="card-header">
+                  <span>#{r.tokenId}</span>
+                  <span className="price">
+                    {(Number(r.listing!.reservePrice) / 1e6).toFixed(2)} {tokenSymbol(r.listing!.paymentToken)}
+                  </span>
+                </div>
+                <div className="card-body">
+                  <span>{(Number(r.inboundAmount) / 1e6).toFixed(2)} {tokenSymbol(r.inboundToken)} incoming</span>
+                  <button disabled={busy[key]} onClick={() => handleDelist(r)}>
+                    {busy[key] ? 'Delisting…' : 'Delist'}
                   </button>
                 </div>
                 {txStatus[key] && <div className="tx-status">{txStatus[key]}</div>}
@@ -163,6 +232,27 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
           )
         })}
       </section>
+
+      {/* Unlisted receivables owned by others — always visible */}
+      {othersUnlisted.length > 0 && (
+        <section>
+          <h2>Unlisted Receivables</h2>
+          {othersUnlisted.map(r => (
+            <div key={r.tokenId} className="card">
+              <div className="card-header">
+                <span>#{r.tokenId}</span>
+                <span>{(Number(r.inboundAmount) / 1e6).toFixed(2)} {tokenSymbol(r.inboundToken)}</span>
+              </div>
+              <div className="card-body">
+                <span className="status">Awaiting listing</span>
+                <span className="owner-hint">
+                  Owner: {r.beneficialOwner.slice(0, 6)}…{r.beneficialOwner.slice(-4)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
     </div>
   )
 }
