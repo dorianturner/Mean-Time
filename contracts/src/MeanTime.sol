@@ -27,6 +27,7 @@ contract MeanTime is ERC721 {
     error InvalidPrice();
     error NotListed();
     error UnknownTransfer();
+    error InsufficientBalance();
 
     // ── Storage ────────────────────────────────────────────────────────────────
 
@@ -40,7 +41,7 @@ contract MeanTime is ERC721 {
     struct NFTData {
         bytes32 cctpMessageHash; // links this NFT to a specific CCTP transfer
         address inboundToken; // the token that will arrive at attestation (e.g. USDC, EURC)
-        uint256 inboundAmount; // face value, in units of inboundToken
+        uint256 inboundAmount; // face value, in units of inboundToken (6 decimals for USDC ERC-20)
         uint256 mintedAt; // block.timestamp at mint — proxy for attestation progress
     }
 
@@ -75,6 +76,17 @@ contract MeanTime is ERC721 {
         uint256 filledAt
     );
     event Settled(uint256 indexed tokenId, address indexed recipient, address inboundToken, uint256 amount);
+
+    /// @notice Emitted at the start of settle/claim with diagnostic data for debugging.
+    event SettleAttempted(
+        uint256 indexed tokenId,
+        address indexed beneficiary,
+        address inboundToken,
+        uint256 inboundAmount,
+        uint256 blockTimestamp,
+        uint256 maturityTimestamp,
+        uint256 contractBalance
+    );
 
     // ── Constructor ────────────────────────────────────────────────────────────
 
@@ -172,21 +184,59 @@ contract MeanTime is ERC721 {
     ///         The contract must hold sufficient inboundToken (routed here by the CCTP bridge).
     ///         Handles the edge case where the NFT is still listed — the listing is cleared and
     ///         the seller receives the inbound tokens as if they had held to maturity.
-    function settle(bytes32 cctpMessageHash) external {
+    ///         Uses the ERC-20 interface for USDC at 0x3600... (6 decimals).
+    function settle(bytes32 cctpMessageHash) public {
         uint256 tokenId = tokenByMessageHash[cctpMessageHash];
         if (tokenId == 0) revert UnknownTransfer();
 
+        _payout(tokenId, cctpMessageHash);
+    }
+
+    /// @notice Convenience: settle by tokenId instead of messageHash.
+    ///         Anyone can call — no ownership check. Pays beneficialOwner[tokenId].
+    function claim(uint256 tokenId) external {
+        NFTData memory data = nftData[tokenId];
+        if (data.mintedAt == 0) revert UnknownTransfer();
+
+        _payout(tokenId, data.cctpMessageHash);
+    }
+
+    /// @dev Shared payout logic for settle() and claim().
+    ///      Reads beneficialOwner[tokenId] (NOT ownerOf — all NFTs are held by address(this)).
+    ///      Transfers inboundAmount of inboundToken via the ERC-20 interface (6 decimals for USDC).
+    ///      Burns NFT and cleans up all state before the transfer (check-effects-interactions).
+    function _payout(uint256 tokenId, bytes32 cctpMessageHash) internal {
         address recipient = beneficialOwner[tokenId];
         address token = nftData[tokenId].inboundToken;
         uint256 amount = nftData[tokenId].inboundAmount;
+        uint256 mintedAt = nftData[tokenId].mintedAt;
 
-        // clean up all state before transfer
+        // Emit diagnostic event BEFORE cleanup so we can trace failures.
+        // contractBalance is the ERC-20 balance of inboundToken held by this contract.
+        uint256 contractBalance = IERC20(token).balanceOf(address(this));
+        emit SettleAttempted(
+            tokenId,
+            recipient,
+            token,
+            amount,
+            block.timestamp,
+            mintedAt + ESTIMATED_ATTESTATION_TIME,
+            contractBalance
+        );
+
+        // Revert early with a clear error if balance is insufficient.
+        // This prevents a confusing SafeERC20 revert from the transfer.
+        if (contractBalance < amount) revert InsufficientBalance();
+
+        // clean up all state before transfer (check-effects-interactions)
         delete beneficialOwner[tokenId];
         delete nftData[tokenId];
         delete listings[tokenId]; // handles: attestation arrives while NFT is still listed
         delete tokenByMessageHash[cctpMessageHash];
         _burn(tokenId);
 
+        // Transfer uses the ERC-20 interface. For Arc USDC (0x3600...),
+        // this is the 6-decimal ERC-20 interface, NOT the 18-decimal native.
         IERC20(token).safeTransfer(recipient, amount);
 
         emit Settled(tokenId, recipient, token, amount);
@@ -212,7 +262,8 @@ contract MeanTime is ERC721 {
         owner = beneficialOwner[tokenId];
         data = nftData[tokenId];
         listing = listings[tokenId];
-        age = data.mintedAt > 0 ? block.timestamp - data.mintedAt : 0;
+        // Use >= so that block.timestamp == mintedAt still gives age 0 (Arc blocks can share timestamps)
+        age = (data.mintedAt > 0 && block.timestamp >= data.mintedAt) ? block.timestamp - data.mintedAt : 0;
         estimatedSecondsLeft =
             (data.mintedAt > 0 && age < ESTIMATED_ATTESTATION_TIME) ? ESTIMATED_ATTESTATION_TIME - age : 0;
     }
@@ -329,7 +380,7 @@ contract MeanTime is ERC721 {
 
     // ── Internal helpers ───────────────────────────────────────────────────────
 
-    /// @dev Format a uint with 6-decimal precision into a human-readable string (e.g. 1000000000 → "1000.000000").
+    /// @dev Format a uint with 6-decimal precision into a human-readable string (e.g. 1000000000 -> "1000.000000").
     function _formatDecimals6(uint256 value) internal pure returns (string memory) {
         uint256 whole = value / 1e6;
         uint256 frac = value % 1e6;

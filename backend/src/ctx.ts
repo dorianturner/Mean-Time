@@ -19,21 +19,21 @@ export interface Addresses {
   bridge:   `0x${string}`
 }
 
-// Sepolia CCTP v1 contracts (Circle official)
+// Sepolia CCTP V2 contracts (Circle official)
 export const SEPOLIA_CCTP = {
-  tokenMessenger:     '0x9f3B8679c73C2Fef8b59B4f3444d4e156fb70AA5' as `0x${string}`,
-  messageTransmitter: '0x7865fAfC2db2093669d92c0F33AeEF291086BEFD' as `0x${string}`,
+  tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA' as `0x${string}`,
+  messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275' as `0x${string}`,
   usdc:               '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238' as `0x${string}`,
   domain:             0,
 }
 
-// Arc testnet CCTP (domain 7 — Circle's own chain)
+// Arc testnet CCTP V2 (domain 26 — Circle's own chain)
 export const ARC_CCTP = {
   // Fill these after querying Arc for Circle's deployed contracts.
   // Until confirmed, leave empty and use the mock-settle fallback.
-  messageTransmitter: (process.env.ARC_MESSAGE_TRANSMITTER ?? '') as `0x${string}`,
-  usdc:               (process.env.ARC_USDC ?? '') as `0x${string}`,
-  domain:             7,
+  messageTransmitter: (process.env.ARC_MESSAGE_TRANSMITTER ?? '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275') as `0x${string}`,
+  usdc:               (process.env.ARC_USDC ?? '0x3600000000000000000000000000000000000000') as `0x${string}`,
+  domain:             26,
 }
 
 export interface AppCtx {

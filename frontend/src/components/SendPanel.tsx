@@ -4,8 +4,8 @@ import { API_BASE } from '../config.js'
 // Sepolia CCTP v1 contracts (Circle official)
 const SEPOLIA_CHAIN_ID        = 11155111
 const SEPOLIA_USDC            = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'
-const SEPOLIA_TOKEN_MESSENGER = '0x9f3B8679c73C2Fef8b59B4f3444d4e156fb70AA5'
-const ARC_DOMAIN              = 7   // Circle CCTP domain for Arc testnet
+const SEPOLIA_TOKEN_MESSENGER = '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA'
+const ARC_DOMAIN              = 26   // Circle CCTP domain for Arc testnet
 
 // ABI encoding helpers
 function encodeUint(n: bigint): string  { return n.toString(16).padStart(64, '0') }
@@ -17,12 +17,16 @@ function encodeApprove(spender: string, amount: bigint): string {
   return '0x095ea7b3' + encodeAddr(spender) + encodeUint(amount)
 }
 
-// TokenMessenger.depositForBurn(uint256,uint32,bytes32,address) — 0x6fd3504e
+// TokenMessengerV2.depositForBurn(uint256,uint32,bytes32,address,bytes32,uint256,uint32) — 0x8e0250ee
+// Standard Transfer: destinationCaller=0, maxFee=0, minFinalityThreshold=2000 (~14 min)
 function encodeDepositForBurn(
   amount: bigint, destDomain: number, mintRecipient: string, burnToken: string,
 ): string {
-  return '0x6fd3504e' + encodeUint(amount) + encodeUint(BigInt(destDomain))
+  return '0x8e0250ee' + encodeUint(amount) + encodeUint(BigInt(destDomain))
     + encodeBytes32(mintRecipient) + encodeAddr(burnToken)
+    + encodeBytes32('0' + '0'.repeat(63))     // destinationCaller = bytes32(0)
+    + encodeUint(0n)                           // maxFee = 0
+    + encodeUint(2000n)                        // minFinalityThreshold = 2000 (Standard)
 }
 
 async function sendTx(from: string, to: string, data: string): Promise<string> {

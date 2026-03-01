@@ -1,5 +1,5 @@
-// Watches Sepolia's CCTP MessageTransmitter for MessageSent events
-// that are destined for Arc (domain 7) with mintRecipient = MeanTime contract.
+// Watches Sepolia's CCTP MessageTransmitterV2 for MessageSent events
+// that are destined for Arc (domain 26) with mintRecipient = MeanTime contract.
 // When found: calls MeanTime.mint() on Arc immediately (optimistic),
 // then starts polling Circle's attestation API for settlement.
 //
@@ -11,6 +11,7 @@ import { type AppCtx, SEPOLIA_CCTP, ARC_CCTP } from './ctx.js'
 import { type Store } from './store.js'
 import { MEANTIME_ABI } from './abi.js'
 import { pollAttestation } from './attestationPoller.js'
+import { enqueueTx } from './txQueue.js'
 
 const MESSAGE_SENT_EVENT = parseAbiItem('event MessageSent(bytes message)')
 
@@ -21,7 +22,7 @@ const BLOCKS_PER_POLL = 2000n
 
 /**
  * Populated by the initiate-cctp route before trackSepoliaTx runs.
- * Maps Sepolia txHash (lowercase) → intended Arc recipient.
+ * Maps Sepolia txHash (lowercase) -> intended Arc recipient.
  * This ensures the background scanner uses the correct recipient
  * even if it processes the burn before trackSepoliaTx does.
  */
@@ -29,26 +30,28 @@ export const intendedRecipients = new Map<string, `0x${string}`>()
 
 /**
  * Parse the raw CCTP message bytes to extract key fields.
- * CCTP v1 message format (big-endian):
- *   0:  version        (4 bytes)
- *   4:  sourceDomain   (4 bytes)
- *   8:  destDomain     (4 bytes)
- *   12: nonce          (8 bytes)
- *   20: sender         (32 bytes)
- *   52: recipient      (32 bytes)
- *   84: destinationCaller (32 bytes)
- *  116: messageBody    (remaining bytes)
+ * CCTP V2 message format (big-endian):
+ *   0:  version            (4 bytes)
+ *   4:  sourceDomain       (4 bytes)
+ *   8:  destDomain         (4 bytes)
+ *  12:  nonce              (32 bytes)  <- V2: was 8 bytes in V1
+ *  44:  sender             (32 bytes)
+ *  76:  recipient          (32 bytes)
+ * 108:  destinationCaller  (32 bytes)
+ * 140:  minFinality        (4 bytes)   <- V2 new
+ * 144:  finalityExecuted   (4 bytes)   <- V2 new
+ * 148:  messageBody        (remaining bytes)
  *
- * BurnMessage body format (starting at offset 116):
+ * BurnMessage body format (starting at offset 148):
  *   0:  version        (4 bytes)
  *   4:  burnToken      (32 bytes)
- *   36: mintRecipient  (32 bytes)
- *   68: amount         (32 bytes)
- *  100: messageSender  (32 bytes)
+ *  36:  mintRecipient  (32 bytes)
+ *  68:  amount         (32 bytes)
+ * 100:  messageSender  (32 bytes)
  */
 export function parseCctpMessage(messageHex: `0x${string}`) {
   const buf = Buffer.from(messageHex.slice(2), 'hex')
-  const bodyOffset = 116
+  const bodyOffset = 148  // V2 header is 148 bytes
 
   const destDomain     = buf.readUInt32BE(8)
   const mintRecipHex   = buf.slice(bodyOffset + 36, bodyOffset + 68).toString('hex')
@@ -73,7 +76,9 @@ export function startSepoliaWatcher(ctx: AppCtx, store: Store): () => void {
     if (stopped) return
     try {
       const latest = await ctx.sepoliaClient.getBlockNumber()
-      const from   = lastBlock !== null ? lastBlock + 1n : latest - BLOCKS_PER_POLL
+      // On first poll, start from the current block so we never replay historical burns.
+      // Only new burns (after the backend started) will be processed.
+      const from   = lastBlock !== null ? lastBlock + 1n : latest
       const to     = latest
 
       if (from > to) {
@@ -89,7 +94,7 @@ export function startSepoliaWatcher(ctx: AppCtx, store: Store): () => void {
       })
 
       if (logs.length > 0) {
-        console.log(`[sepolia-watcher] Found ${logs.length} MessageSent log(s) in blocks ${from}–${to}`)
+        console.log(`[sepolia-watcher] Found ${logs.length} MessageSent log(s) in blocks ${from}-${to}`)
       }
 
       for (const log of logs) {
@@ -106,17 +111,29 @@ export function startSepoliaWatcher(ctx: AppCtx, store: Store): () => void {
           if (parsed.mintRecipient.toLowerCase() !== meantimeLower) continue
 
           const messageHash  = keccak256(messageBytes)
-          const inboundToken = ARC_CCTP.usdc || ctx.addresses.usdc
+
+          // Skip hashes that were already minted (or minted+settled) — prevents
+          // phantom receivables and duplicate pollers.
+          if (store.isKnown(messageHash)) {
+            console.log(`[sepolia-watcher] ${messageHash} already known, skipping`)
+            continue
+          }
+
+          const inboundToken = ctx.addresses.usdc
+          const sourceTxHash = log.transactionHash ?? undefined
 
           // Prefer the intended recipient registered by initiate-cctp over messageSender
-          const txHashKey = (log.transactionHash ?? '').toLowerCase()
+          const txHashKey = (sourceTxHash ?? '').toLowerCase()
           const recipient  = intendedRecipients.get(txHashKey)
             ?? (parsed.messageSender as `0x${string}`)
             ?? ctx.account.address
 
           console.log(`[sepolia-watcher] CCTP burn! hash=${messageHash} amount=${parsed.amount} recipient=${recipient}`)
           await mintOnArc(ctx, messageHash, inboundToken, parsed.amount, recipient)
-          pollAttestation(ctx, store, messageHash, messageBytes).catch(err =>
+          store.markKnown(messageHash)
+
+          // Pass sourceTxHash and sourceDomain for V2 attestation API
+          pollAttestation(ctx, store, messageHash, messageBytes, sourceTxHash, SEPOLIA_CCTP.domain).catch(err =>
             console.error('[sepolia-watcher] Attestation poller error:', err),
           )
         } catch (err) {
@@ -166,6 +183,11 @@ export async function trackSepoliaTx(
     return null
   }
 
+  if (receipt.status !== 'success') {
+    console.error(`[sepolia-tracker] Tx reverted on Sepolia: ${txHash}`)
+    return null
+  }
+
   const meantimeLower = ctx.addresses.meantime.toLowerCase()
   const mtLower = SEPOLIA_CCTP.messageTransmitter.toLowerCase()
 
@@ -186,18 +208,40 @@ export async function trackSepoliaTx(
       if (parsed.mintRecipient.toLowerCase() !== meantimeLower) continue
 
       const messageHash  = keccak256(messageBytes)
-      const inboundToken = ARC_CCTP.usdc || ctx.addresses.usdc
+      const inboundToken = ctx.addresses.usdc
+
+      // If already known (watcher beat us), just ensure a poller is running
+      if (store.isKnown(messageHash)) {
+        console.log(`[sepolia-tracker] ${messageHash} already known, ensuring poller`)
+        pollAttestation(ctx, store, messageHash, messageBytes, txHash, SEPOLIA_CCTP.domain).catch(err =>
+          console.error('[sepolia-tracker] Attestation poller error:', err),
+        )
+        const existing = store.snapshot().find(
+          receivable => receivable.cctpMessageHash.toLowerCase() === messageHash.toLowerCase(),
+        )
+        return existing ? { tokenId: existing.tokenId.toString(), messageHash } : null
+      }
 
       const resolvedRecipient = (recipient && /^0x[0-9a-fA-F]{40}$/.test(recipient))
         ? recipient as `0x${string}`
         : parsed.messageSender ?? ctx.account.address
 
       const tokenId = await mintOnArc(ctx, messageHash, inboundToken, parsed.amount, resolvedRecipient)
-      pollAttestation(ctx, store, messageHash, messageBytes).catch(err =>
+      store.markKnown(messageHash)
+
+      // Pass txHash as sourceTxHash for V2 attestation API
+      pollAttestation(ctx, store, messageHash, messageBytes, txHash, SEPOLIA_CCTP.domain).catch(err =>
         console.error('[sepolia-tracker] Attestation poller error:', err),
       )
 
-      return { tokenId: tokenId?.toString() ?? '?', messageHash }
+      if (!tokenId) {
+        const fallback = store.snapshot().find(
+          receivable => receivable.cctpMessageHash.toLowerCase() === messageHash.toLowerCase(),
+        )
+        return fallback ? { tokenId: fallback.tokenId.toString(), messageHash } : null
+      }
+
+      return { tokenId: tokenId.toString(), messageHash }
     } catch {
       // Not a MessageSent log from the MessageTransmitter, skip
     }
@@ -228,14 +272,16 @@ async function mintOnArc(
     }
 
     console.log(`[mint-on-arc] Minting: hash=${messageHash} amount=${amount} recipient=${recipient}`)
-    const txHash = await ctx.walletClient.writeContract({
-      address:      ctx.addresses.meantime,
-      abi:          MEANTIME_ABI,
-      functionName: 'mint',
-      args:         [messageHash, inboundToken, amount, recipient],
-      account:      ctx.account,
-      chain:        null,
-    })
+    const txHash = await enqueueTx(() =>
+      ctx.walletClient.writeContract({
+        address:      ctx.addresses.meantime,
+        abi:          MEANTIME_ABI,
+        functionName: 'mint',
+        args:         [messageHash, inboundToken, amount, recipient],
+        account:      ctx.account,
+        chain:        null,
+      }),
+    )
     console.log(`[mint-on-arc] Tx submitted: ${txHash}`)
     const receipt = await ctx.publicClient.waitForTransactionReceipt({ hash: txHash })
     for (const log of receipt.logs) {

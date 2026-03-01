@@ -31,11 +31,16 @@ export interface Store {
   remove(tokenId: bigint): void
   subscribe(fn: (event: StoreEvent) => void): () => void
   emit(event: StoreEvent): void
+  /** Record a CCTP message hash as known (minted or settled). */
+  markKnown(hash: string): void
+  /** True if the hash was ever minted (even if later settled). */
+  isKnown(hash: string): boolean
 }
 
 export function createStore(): Store {
   const receivables = new Map<bigint, Receivable>()
   const subscribers = new Set<(event: StoreEvent) => void>()
+  const knownHashes = new Set<string>()
 
   return {
     get(tokenId) {
@@ -46,6 +51,7 @@ export function createStore(): Store {
     },
     upsert(r) {
       receivables.set(r.tokenId, r)
+      knownHashes.add(r.cctpMessageHash.toLowerCase())
     },
     patch(tokenId, update) {
       const existing = receivables.get(tokenId)
@@ -64,6 +70,12 @@ export function createStore(): Store {
       for (const fn of subscribers) {
         try { fn(event) } catch { /* never crash the watcher */ }
       }
+    },
+    markKnown(hash: string) {
+      knownHashes.add(hash.toLowerCase())
+    },
+    isKnown(hash: string) {
+      return knownHashes.has(hash.toLowerCase())
     },
   }
 }

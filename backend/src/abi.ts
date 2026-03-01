@@ -45,10 +45,23 @@ export const MEANTIME_ABI = [
     type: 'event',
     name: 'Settled',
     inputs: [
-      { name: 'tokenId',     type: 'uint256', indexed: true  },
-      { name: 'recipient',   type: 'address', indexed: true  },
+      { name: 'tokenId',      type: 'uint256', indexed: true  },
+      { name: 'recipient',    type: 'address', indexed: true  },
       { name: 'inboundToken', type: 'address', indexed: false },
-      { name: 'amount',      type: 'uint256', indexed: false },
+      { name: 'amount',       type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'SettleAttempted',
+    inputs: [
+      { name: 'tokenId',           type: 'uint256', indexed: true  },
+      { name: 'beneficiary',       type: 'address', indexed: true  },
+      { name: 'inboundToken',      type: 'address', indexed: false },
+      { name: 'inboundAmount',     type: 'uint256', indexed: false },
+      { name: 'blockTimestamp',    type: 'uint256', indexed: false },
+      { name: 'maturityTimestamp', type: 'uint256', indexed: false },
+      { name: 'contractBalance',   type: 'uint256', indexed: false },
     ],
   },
   // ── Read functions ──────────────────────────────────────────────────────────
@@ -88,6 +101,32 @@ export const MEANTIME_ABI = [
     stateMutability: 'view',
     inputs:  [{ name: 'messageHash', type: 'bytes32' }],
     outputs: [{ name: 'tokenId', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'getReceivable',
+    stateMutability: 'view',
+    inputs:  [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [
+      { name: 'owner',              type: 'address' },
+      { name: 'data',               type: 'tuple',
+        components: [
+          { name: 'cctpMessageHash', type: 'bytes32' },
+          { name: 'inboundToken',    type: 'address' },
+          { name: 'inboundAmount',   type: 'uint256' },
+          { name: 'mintedAt',        type: 'uint256' },
+        ],
+      },
+      { name: 'listing',            type: 'tuple',
+        components: [
+          { name: 'reservePrice', type: 'uint256' },
+          { name: 'paymentToken', type: 'address' },
+          { name: 'active',       type: 'bool'    },
+        ],
+      },
+      { name: 'age',                type: 'uint256' },
+      { name: 'estimatedSecondsLeft', type: 'uint256' },
+    ],
   },
   // ── Write functions (marketplace) ───────────────────────────────────────────
   {
@@ -133,6 +172,13 @@ export const MEANTIME_ABI = [
     name: 'settle',
     stateMutability: 'nonpayable',
     inputs:  [{ name: 'cctpMessageHash', type: 'bytes32' }],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'claim',
+    stateMutability: 'nonpayable',
+    inputs:  [{ name: 'tokenId', type: 'uint256' }],
     outputs: [],
   },
 ] as const

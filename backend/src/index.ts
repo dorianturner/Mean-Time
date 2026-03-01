@@ -3,6 +3,7 @@ import { buildCtx }     from './ctx.js'
 import { createStore }  from './store.js'
 import { backfillStore, startWatcher } from './watcher.js'
 import { startSepoliaWatcher } from './sepoliaWatcher.js'
+import { recoverSettlements } from './attestationPoller.js'
 import { createApp }    from './app.js'
 
 const PORT = Number(process.env.PORT ?? 3001)
@@ -15,30 +16,36 @@ backfillStore(ctx, store)
   .catch((err) => {
     console.warn('[backfill] Failed (rate limit or RPC error) — starting without history:', err?.shortMessage ?? err)
   })
-  .then(() => {
-  const stopArcWatcher     = startWatcher(ctx, store)
-  const stopSepoliaWatcher = startSepoliaWatcher(ctx, store)
+  .then(async () => {
+    const stopArcWatcher     = startWatcher(ctx, store)
+    const stopSepoliaWatcher = startSepoliaWatcher(ctx, store)
 
-  const app = createApp(ctx, store)
+    // After backfill and watchers are running, recover any attestations
+    // that completed while the backend was down.
+    recoverSettlements(ctx, store).catch(err =>
+      console.error('[recovery] Failed:', err),
+    )
 
-  const server = app.listen(PORT, () => {
-    console.log(`MeanTime backend listening on http://localhost:${PORT}`)
-    console.log(`  MeanTime: ${ctx.addresses.meantime}`)
-    console.log(`  USDC:     ${ctx.addresses.usdc}`)
-    console.log(`  EURC:     ${ctx.addresses.eurc}`)
-  })
+    const app = createApp(ctx, store)
 
-  process.on('SIGTERM', () => {
-    stopArcWatcher()
-    stopSepoliaWatcher()
-    server.close(() => process.exit(0))
-  })
+    const server = app.listen(PORT, () => {
+      console.log(`MeanTime backend listening on http://localhost:${PORT}`)
+      console.log(`  MeanTime: ${ctx.addresses.meantime}`)
+      console.log(`  USDC:     ${ctx.addresses.usdc}`)
+      console.log(`  EURC:     ${ctx.addresses.eurc}`)
+    })
 
-  process.on('SIGINT', () => {
-    stopArcWatcher()
-    stopSepoliaWatcher()
-    server.close(() => process.exit(0))
-  })
+    process.on('SIGTERM', () => {
+      stopArcWatcher()
+      stopSepoliaWatcher()
+      server.close(() => process.exit(0))
+    })
+
+    process.on('SIGINT', () => {
+      stopArcWatcher()
+      stopSepoliaWatcher()
+      server.close(() => process.exit(0))
+    })
   }).catch((err) => {
     console.error('Failed to start:', err)
     process.exit(1)
