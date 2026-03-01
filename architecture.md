@@ -1,60 +1,96 @@
 # Architecture
 
-InstantSettle is a three-tier protocol: a Solidity contract on Arc, a Node.js backend, and a React frontend. The backend acts as the glue between Circle's off-chain attestation API and the on-chain settlement logic.
+MeanTime is a three-tier protocol: a **Solidity smart contract** on Arc, a **Node.js backend**, and a **React frontend**. The backend acts as the glue between Circle's off-chain attestation API and the on-chain settlement logic.
+
+---
+
+## Table of Contents
+
+- [High-Level Flow](#high-level-flow)
+- [Component Map](#component-map)
+- [Circle Tools Used](#circle-tools-used)
+- [Smart Contract Design](#smart-contract-design)
+- [Data Flow: Listing and Fill](#data-flow-listing-and-fill)
+- [Data Flow: Settlement](#data-flow-settlement)
+- [Backend State Machine](#backend-state-machine)
+- [Network Configuration](#network-configuration)
+- [Security Model](#security-model)
+- [Why Arc](#why-arc)
+- [Testnet Limitations](#testnet-limitations)
 
 ---
 
 ## High-Level Flow
 
+Circle's infrastructure (highlighted with `[ ]`) sits at three points in the flow: the source-chain burn, the attestation service, and the destination-chain mint.
+
 ```
-  Ethereum Sepolia                    Arc Testnet (Chain 5042002)
-  ─────────────────                   ──────────────────────────
-  User holds USDC
+  USER (Sepolia)               CIRCLE INFRASTRUCTURE          ARC TESTNET
+  ──────────────               ─────────────────────          ──────────────────────
+
+  Frontend: SendPanel
        │
-       │  approve TokenMessenger
-       │  depositForBurn()
+       │ 1. approve USDC spend
        ▼
-  CCTP TokenMessenger burns USDC
-  MessageTransmitter emits MessageSent
+  [CCTP TokenMessenger]        ──────────────────────────────────────────────────────
+  depositForBurn()             │  Circle burns USDC on Sepolia
+       │                       │  emits MessageSent(rawMessageBytes)
+       │                       └──────────────────────────────────────────────────────
+       ▼
+  Backend: sepoliaWatcher
+  polls MessageTransmitter
+  every 30s, detects burn
        │
-       │  (backend detects within ~30s)
-       ▼
-  Backend: sepoliaWatcher detects burn
+       │ 2. mint() optimistically (before attestation)
+       ▼                                                       MeanTime.sol
+                                                               NFT minted
+                                                               beneficialOwner = recipient
+                                                               SSE → frontend
        │
-       │  mint() on-chain (optimistic, before attestation)
+       │ 3. backend starts polling Circle
        ▼
-  MeanTime.sol mints ERC-721 NFT ─────────────────────────────────►  NFT held by contract
-       │                                                              beneficialOwner = recipient
+                               [Circle Attestation API]
+                               iris-api-sandbox.circle.com
+                               /attestations/{messageHash}
+                               polling every 30s
+                                        │
+                               (~17 min later)
+                               status: complete + signature
+                                        │
+       ┌────────────────────────────────┘
+       │ 4. receiveMessage(message, attestation)
+       ▼
+  [CCTP MessageTransmitter]                                    USDC minted
+  on Arc                       ──────────────────────────────► to MeanTime contract
+                                                                    │
+                                                               5. settle()
+                                                                    │
+                                                               USDC → beneficialOwner
+                                                               NFT burned
+
+  ── ── ── ── ── OPTIONAL MARKETPLACE PATH ── ── ── ── ──
+
+  After step 2, before step 4:
+
+  Receiver lists NFT ──► Relayer fills ──► receiver gets ARC tokens instantly
+                                           relayer becomes beneficialOwner
+                                           (receives USDC at step 5)
+```
+
+### Alternative: Circle Bridge Kit
+
+`bridgeService.ts` wraps `@circle-fin/bridge-kit` as a higher-level alternative to the manual CCTP flow above. It handles steps 1-4 in a single SDK call and supports multiple source chains (Sepolia, Arbitrum, Base).
+
+```
+  Frontend / CLI
        │
-       │  (SSE event pushed to frontend)
        ▼
-  Frontend: NFT appears in Marketplace
-       │
-       │  [optional] user lists NFT for sale (EURC)
-       │  list() transaction on Arc
-       ▼
-  Relayer: sees Listed event
-       │
-       │  approve paymentToken + fill()
-       ▼
-  MeanTime.sol: transfers EURC to seller
-               beneficialOwner = relayer
-       │
-       │  (~17 min later...)
-       ▼
-  Circle: attestation complete
-       │
-       │  backend polls iris-api-sandbox.circle.com
-       ▼
-  Arc MessageTransmitter.receiveMessage()
-       │  USDC arrives at MeanTime contract
-       ▼
-  Backend: settle() on Arc
+  [Circle Bridge Kit]          handles approve + depositForBurn + polling
+  @circle-fin/bridge-kit       + receiveMessage automatically
+  @circle-fin/adapter-viem-v2
        │
        ▼
-  MeanTime.sol: transfers USDC to beneficialOwner
-               NFT burned
-               All state cleared
+  Same outcome: USDC arrives at MeanTime on Arc
 ```
 
 ---
@@ -104,21 +140,25 @@ InstantSettle is a three-tier protocol: a Solidity contract on Arc, a Node.js ba
 
 ## Circle Tools Used
 
-### CCTP (Cross-Chain Transfer Protocol) v1 / v2
+MeanTime is built on three Circle primitives. This section details exactly how each is integrated.
+
+### CCTP (Cross-Chain Transfer Protocol) v2
 
 CCTP is the core primitive the protocol is built on. It provides a trustless burn-and-mint mechanism for USDC across chains, backed by Circle's attestation service.
 
-**How we use it:**
+**How we use it — step by step:**
 
-1. **Source chain (Sepolia):** The `SendPanel` calls `depositForBurn()` on Circle's `TokenMessenger` contract. This burns the user's USDC and emits a `MessageSent` event containing the raw CCTP message bytes.
+1. **Source chain burn (Sepolia):** The `SendPanel` in the frontend calls `depositForBurn()` on Circle's `TokenMessenger` (v2) contract. This burns the user's USDC and emits a `MessageSent` event containing the raw CCTP message bytes. The destination domain is set to `26` (Arc) and the mint recipient is the MeanTime contract address.
 
-2. **Message detection:** The backend's `sepoliaWatcher.ts` polls the Sepolia `MessageTransmitter` for `MessageSent` events, decodes the CCTP message bytes, and identifies burns destined for Arc (domain 26) with MeanTime as the mint recipient.
+2. **Message detection:** The backend's `sepoliaWatcher.ts` polls the Sepolia `MessageTransmitter` for `MessageSent` events every 30 seconds using `getLogs` (public Sepolia RPCs don't support persistent filters). It parses the CCTP v2 message format:
+   - **Header (148 bytes):** version (4B), sourceDomain (4B), destDomain (4B), nonce (32B), sender (32B), recipient (32B), destinationCaller (32B), minFinality (4B), finalityExecuted (4B)
+   - **BurnMessage body:** version (4B), burnToken (32B), mintRecipient (32B), amount (32B), messageSender (32B)
 
-3. **Optimistic minting:** Before waiting for Circle's attestation, the backend immediately mints an NFT on Arc via `MeanTime.mint()`. This is the "instant" part of InstantSettle.
+3. **Optimistic minting:** Before waiting for Circle's attestation (the key innovation), the backend immediately mints an NFT on Arc via `MeanTime.mint()`. The message hash (`keccak256(rawMessageBytes)`) becomes the canonical identifier linking the NFT to the CCTP transfer.
 
-4. **Attestation polling:** `attestationPoller.ts` polls `iris-api-sandbox.circle.com/attestations/{messageHash}` every 30 seconds. The message hash is `keccak256(rawMessageBytes)`.
+4. **Attestation polling:** `attestationPoller.ts` polls `iris-api-sandbox.circle.com/attestations/{messageHash}` every 30 seconds. When Circle returns `status: complete` along with a signature, the transfer is ready to settle.
 
-5. **Destination chain (Arc):** When Circle returns `status: complete` along with a signature, the backend calls `MessageTransmitter.receiveMessage(message, attestation)` on Arc to release the minted USDC to the MeanTime contract. Then it calls `MeanTime.settle()` to pay the current beneficial owner and burn the NFT.
+5. **Destination chain settlement (Arc):** The backend calls `MessageTransmitter.receiveMessage(message, attestation)` on Arc to release the minted USDC to the MeanTime contract. Then it calls `MeanTime.settle()` to pay the current beneficial owner and burn the NFT.
 
 | CCTP Component | Sepolia Address |
 |---|---|
@@ -126,23 +166,58 @@ CCTP is the core primitive the protocol is built on. It provides a trustless bur
 | MessageTransmitter (v2) | `0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275` |
 | USDC | `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238` |
 
-| CCTP Component | Arc Domain |
+| CCTP Parameter | Value |
 |---|---|
-| CCTP Domain | 26 |
+| Arc Domain | 26 |
+| Required Confirmations | 65 blocks (~17 minutes) |
+| Finality Threshold | 2000 (Standard Transfer) |
+
+### USDC & EURC (Circle Stablecoins)
+
+Both stablecoins are natively issued by Circle on Arc:
+
+- **USDC** (`0x3600000000000000000000000000000000000000`) — The inbound token from CCTP transfers. Used as the settlement currency. 6 decimals via ERC-20 interface; note: 18 decimals as native gas token — these are never mixed.
+- **EURC** — Default payment token on the marketplace. Relayers pay EURC to buy USDC receivables, monetising the FX spread during the attestation window.
+
+The protocol requires both stablecoins to be credibly liquid on the destination chain for the marketplace to function.
 
 ### Circle Bridge Kit (`@circle-fin/bridge-kit`)
 
 The backend also integrates Circle's official Bridge Kit SDK via `bridgeService.ts`. This provides a higher-level abstraction over raw CCTP that handles multi-chain routing, fee estimation, and approval flow automatically.
 
+**Key implementation details:**
+- Uses `@circle-fin/adapter-viem-v2` for wallet integration (standard private keys, no developer-controlled wallets, no API key required)
+- Source adapter: sender's private key (approves + burns on source chain)
+- Arc adapter: deployer private key (calls `receiveMessage` on Arc)
+- Recipient address: MeanTime contract (receives the USDC)
+- After bridge completes: deployer calls `MeanTime.mint()` + `MeanTime.settle()`
+
+**Supported source chains:**
+| Chain | Bridge Kit Name | CCTP Domain |
+|---|---|---|
+| Ethereum Sepolia | `Ethereum_Sepolia` | 0 |
+| Arbitrum Sepolia | `Arbitrum_Sepolia` | 3 |
+| Base Sepolia | `Base_Sepolia` | 6 |
+
 Exposed as:
-- REST endpoint: `POST /api/bridge/bridge-kit`
-- CLI: `npx tsx src/bridgeService.ts --source ethereum-sepolia --amount 10 --recipient 0x...`
+- **REST endpoint:** `POST /api/bridge/bridge-kit`
+- **CLI:** `npx tsx src/bridgeService.ts --source ethereum-sepolia --amount 10 --recipient 0x...`
 
-The Bridge Kit integration supports Sepolia, Arbitrum, and Base as source chains.
+### Circle Attestation Service (`iris-api-sandbox.circle.com`)
 
-### Attestation API (iris-api-sandbox.circle.com)
+Circle's attestation service signs CCTP messages after the required number of source-chain confirmations. The backend polls this API for each pending transfer:
 
-Circle's attestation service signs CCTP messages after the required number of source-chain confirmations. The backend polls this API for each pending transfer. The attestation signature is required to call `receiveMessage()` on the destination chain.
+```
+GET https://iris-api-sandbox.circle.com/attestations/{messageHash}
+
+// Pending:
+{ "status": "pending_confirmations", "attestation": null }
+
+// Complete:
+{ "status": "complete", "attestation": "0x<signature>" }
+```
+
+The attestation signature is the cryptographic proof required to call `receiveMessage()` on the destination chain. As a testnet fallback, if attestation doesn't arrive within 17 minutes, the backend auto-settles by mock-minting USDC and calling `settle()` directly.
 
 ---
 
@@ -229,23 +304,56 @@ Each receivable in `store.ts` transitions through these states, driven by on-cha
     └── settled ──────────────► [removed from store]
 ```
 
-The store is rebuilt from the last ~50k Arc blocks on every backend restart via `backfillStore()`. There is no database.
+The store is rebuilt from the last ~50k Arc blocks on every backend restart via `backfillStore()`. There is no database. State is replayed from the chain, making the backend stateless and restartable.
+
+**Key backend services:**
+
+| Service | File | Role | Interval |
+|---|---|---|---|
+| Sepolia Watcher | `sepoliaWatcher.ts` | Detect CCTP burns on Sepolia, mint NFTs on Arc | 30s poll |
+| Arc Watcher | `watcher.ts` | Track contract events (Minted, Listed, Filled, Settled) | 2s poll |
+| Attestation Poller | `attestationPoller.ts` | Poll Circle API, settle when attestation arrives | 30s poll |
+| Transaction Queue | `txQueue.ts` | Serialize on-chain writes to prevent nonce collisions | On-demand |
+| SSE Event Bus | `store.ts` | Push real-time updates to connected frontends | On event |
+| Bridge Kit | `bridgeService.ts` | Alternative CCTP integration via Circle SDK | On request |
 
 ---
 
 ## Network Configuration
 
-| Network | Chain ID | Role |
-|---|---|---|
-| Ethereum Sepolia | 11155111 | Source chain for USDC burns |
-| Arc Testnet | 5042002 | Destination chain, marketplace |
+| Network | Chain ID | CCTP Domain | Role |
+|---|---|---|---|
+| Ethereum Sepolia | 11155111 | 0 | Source chain for USDC burns |
+| Arc Testnet | 5042002 | 26 | Destination chain, marketplace |
 
 | Deployed Contract | Address |
 |---|---|
-| MeanTime | `0x0769d1d0662894dC29cdADE1102411D2a059cc1c` |
-| MockUSDC | `0xBc7f753Da5b2050bdc7F1cc7DB9FEcF0368adA34` |
-| MockEURC | `0xa1E57ECab96596b36bf60B0191b2D4fDDc554847` |
-| Bridge (deployer) | `0x896C329E894739418Ea7F26D62D83D9BC61f083E` |
+| MeanTime | See `deployments.json` |
+| MockUSDC | See `deployments.json` |
+| MockEURC | See `deployments.json` |
+| Bridge (deployer) | See `deployments.json` |
+
+---
+
+## Security Model
+
+MeanTime's security relies on several layers:
+
+**On-chain (MeanTime.sol):**
+- **Access control:** Only the designated bridge address can mint NFTs. Marketplace operations are restricted to beneficial owners.
+- **Checks-effects-interactions:** All storage is cleared and the NFT burned before any token transfer leaves the contract. No reentrancy surface exists.
+- **No oracle dependency:** The contract has no pricing logic and no oracle. All risk modelling is external (in relayer bots).
+- **Atomic settlement:** `_settle()` reads state, clears all mappings, burns the NFT, then transfers tokens — in a single transaction.
+- **Race condition safety:** Concurrent `fill()` and `settle()` in the same block resolve cleanly regardless of ordering. See [Specification.md](contracts/Specification.md) for detailed analysis.
+
+**Off-chain (Backend):**
+- **Serial transaction queue** (`txQueue.ts`): Prevents nonce collisions when multiple events arrive simultaneously.
+- **Stateless restart:** The backend rebuilds state from chain events on startup. No database means no state corruption risk.
+- **Intended recipient tracking:** The `intendedRecipients` map prevents minting to the wrong beneficiary.
+
+**Trust assumptions:**
+- The bridge service (backend) is trusted to supply correct mint parameters. There is no on-chain verification of the source-chain burn — this is a deliberate trade-off for speed (optimistic minting).
+- Circle's attestation service is trusted to only sign valid CCTP messages.
 
 ---
 
