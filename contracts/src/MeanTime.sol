@@ -72,9 +72,9 @@ contract MeanTime is ERC721 {
     ///      estimate as exactly that — an estimate.
     struct NFTData {
         bytes32 cctpMessageHash; // unique identifier linking this NFT to a specific CCTP message
-        address inboundToken;    // which token will arrive (USDC, EURC, ...)
-        uint256 inboundAmount;   // face value in token's native decimals (USDC: 6)
-        uint256 mintedAt;        // block.timestamp at creation, used to track age
+        address inboundToken; // which token will arrive (USDC, EURC, ...)
+        uint256 inboundAmount; // face value in token's native decimals (USDC: 6)
+        uint256 mintedAt; // block.timestamp at creation, used to track age
     }
 
     /// @notice A sell order posted by the current beneficial owner.
@@ -381,13 +381,7 @@ contract MeanTime is ERC721 {
     function getReceivable(uint256 tokenId)
         external
         view
-        returns (
-            address owner,
-            NFTData memory data,
-            Listing memory listing,
-            uint256 age,
-            uint256 estimatedSecondsLeft
-        )
+        returns (address owner, NFTData memory data, Listing memory listing, uint256 age, uint256 estimatedSecondsLeft)
     {
         owner = beneficialOwner[tokenId];
         data = nftData[tokenId];
@@ -435,7 +429,8 @@ contract MeanTime is ERC721 {
             listing.active ? string.concat(_formatDecimals6(listing.reservePrice), " (listed)") : "Not listed";
         string memory barColor = ready ? "#22c55e" : "#3b82f6";
 
-        string memory svg = _buildSvg(tokenId, amountStr, data, ageStr, remainStr, listingStr, barColor, progressPct, age);
+        string memory svg =
+            _buildSvg(tokenId, amountStr, data, ageStr, remainStr, listingStr, barColor, progressPct, age);
         string memory json = _buildJson(tokenId, amountStr, svg, age, secsLeft, listing);
 
         return string.concat("data:application/json;base64,", Base64.encode(bytes(json)));
