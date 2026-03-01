@@ -1,6 +1,6 @@
 # MeanTime
 
-**Tokenised CCTP receivables.** Every cross-chain USDC transfer becomes a tradeable on-chain asset during the ~17-minute attestation window.
+**Tokenised CCTP receivables.** Every cross-chain USDC transfer becomes a tradeable on-chain asset during the attestation window for a CCTP transfer to ARC.
 
 MeanTime is built on [Circle's](https://www.circle.com) CCTP (Cross-Chain Transfer Protocol), USDC, EURC, and Bridge Kit — running on **Arc Testnet** with **Ethereum Sepolia** as the source chain.
 
@@ -62,7 +62,7 @@ Open `http://localhost:5173`. Connect MetaMask, switch to Sepolia, and send USDC
 
 ## What It Does
 
-When USDC is bridged from Ethereum to Arc via CCTP Standard Transfer, Circle requires **65 block confirmations** before releasing funds on the destination chain. That takes **15–19 minutes**. During that window the receiver has no money and no position.
+When USDC is bridged from Ethereum to Arc via CCTP Standard Transfer, Circle requires **65 block confirmations** before releasing funds on the destination chain. That takes **15–19 minutes** (for CCTPv1). During that window the receiver has no money and no position.
 
 MeanTime mints an **ERC-721 NFT** the moment the source-chain burn is detected. That NFT represents the incoming USDC, and it can be traded immediately on a built-in marketplace.
 
@@ -405,3 +405,4 @@ VITE_API_BASE=https://your-backend.example.com npm run build
 ## License
 
 MIT
+
