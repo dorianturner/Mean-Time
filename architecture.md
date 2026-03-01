@@ -1,60 +1,80 @@
 # Architecture
 
-InstantSettle is a three-tier protocol: a Solidity contract on Arc, a Node.js backend, and a React frontend. The backend acts as the glue between Circle's off-chain attestation API and the on-chain settlement logic.
+MeanTime is a three-tier protocol: a Solidity contract on Arc, a Node.js backend, and a React frontend. The backend acts as the glue between Circle's off-chain attestation API and the on-chain settlement logic.
 
 ---
 
 ## High-Level Flow
 
+Circle's infrastructure (highlighted with `[ ]`) sits at three points in the flow: the source-chain burn, the attestation service, and the destination-chain mint.
+
 ```
-  Ethereum Sepolia                    Arc Testnet (Chain 5042002)
-  ─────────────────                   ──────────────────────────
-  User holds USDC
+  USER (Sepolia)               CIRCLE INFRASTRUCTURE          ARC TESTNET
+  ──────────────               ─────────────────────          ──────────────────────
+
+  Frontend: SendPanel
        │
-       │  approve TokenMessenger
-       │  depositForBurn()
+       │ 1. approve USDC spend
        ▼
-  CCTP TokenMessenger burns USDC
-  MessageTransmitter emits MessageSent
+  [CCTP TokenMessenger]        ──────────────────────────────────────────────────────
+  depositForBurn()             │  Circle burns USDC on Sepolia
+       │                       │  emits MessageSent(rawMessageBytes)
+       │                       └──────────────────────────────────────────────────────
+       ▼
+  Backend: sepoliaWatcher
+  polls MessageTransmitter
+  every 30s, detects burn
        │
-       │  (backend detects within ~30s)
-       ▼
-  Backend: sepoliaWatcher detects burn
+       │ 2. mint() optimistically (before attestation)
+       ▼                                                       MeanTime.sol
+                                                               NFT minted
+                                                               beneficialOwner = recipient
+                                                               SSE → frontend
        │
-       │  mint() on-chain (optimistic, before attestation)
+       │ 3. backend starts polling Circle
        ▼
-  MeanTime.sol mints ERC-721 NFT ─────────────────────────────────►  NFT held by contract
-       │                                                              beneficialOwner = recipient
+                               [Circle Attestation API]
+                               iris-api-sandbox.circle.com
+                               /attestations/{messageHash}
+                               polling every 30s
+                                        │
+                               (~17 min later)
+                               status: complete + signature
+                                        │
+       ┌────────────────────────────────┘
+       │ 4. receiveMessage(message, attestation)
+       ▼
+  [CCTP MessageTransmitter]                                    USDC minted
+  on Arc                       ──────────────────────────────► to MeanTime contract
+                                                                    │
+                                                               5. settle()
+                                                                    │
+                                                               USDC → beneficialOwner
+                                                               NFT burned
+
+  ── ── ── ── ── OPTIONAL MARKETPLACE PATH ── ── ── ── ──
+
+  After step 2, before step 4:
+
+  Receiver lists NFT ──► Relayer fills ──► receiver gets ARC tokens instantly
+                                           relayer becomes beneficialOwner
+                                           (receives USDC at step 5)
+```
+
+### Alternative: Circle Bridge Kit
+
+`bridgeService.ts` wraps `@circle-fin/bridge-kit` as a higher-level alternative to the manual CCTP flow above. It handles steps 1-4 in a single SDK call and supports multiple source chains (Sepolia, Arbitrum, Base).
+
+```
+  Frontend / CLI
        │
-       │  (SSE event pushed to frontend)
        ▼
-  Frontend: NFT appears in Marketplace
-       │
-       │  [optional] user lists NFT for sale (EURC)
-       │  list() transaction on Arc
-       ▼
-  Relayer: sees Listed event
-       │
-       │  approve paymentToken + fill()
-       ▼
-  MeanTime.sol: transfers EURC to seller
-               beneficialOwner = relayer
-       │
-       │  (~17 min later...)
-       ▼
-  Circle: attestation complete
-       │
-       │  backend polls iris-api-sandbox.circle.com
-       ▼
-  Arc MessageTransmitter.receiveMessage()
-       │  USDC arrives at MeanTime contract
-       ▼
-  Backend: settle() on Arc
+  [Circle Bridge Kit]          handles approve + depositForBurn + polling
+  @circle-fin/bridge-kit       + receiveMessage automatically
+  @circle-fin/adapter-viem-v2
        │
        ▼
-  MeanTime.sol: transfers USDC to beneficialOwner
-               NFT burned
-               All state cleared
+  Same outcome: USDC arrives at MeanTime on Arc
 ```
 
 ---
