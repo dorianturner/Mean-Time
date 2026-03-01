@@ -1,23 +1,43 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ConnectButton }   from './components/ConnectButton.js'
 import { Marketplace }     from './components/Marketplace.js'
-import { BridgePanel }     from './components/BridgePanel.js'
+import { SendPanel }       from './components/SendPanel.js'
 import { useReceivables }  from './hooks/useReceivables.js'
 import { useTokenSymbols } from './hooks/useTokenSymbols.js'
+import { useWallet }       from './hooks/useWallet.js'
+import { API_BASE }        from './config.js'
 import './App.css'
 
-const USDC_ADDR = import.meta.env.VITE_USDC_ADDR ?? '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D'
-const EURC_ADDR = import.meta.env.VITE_EURC_ADDR ?? '0xBE756BAB8aC57C89B07Bb900cE9D8E97a61D622F'
-
-type Tab = 'marketplace' | 'bridge'
+type Tab = 'marketplace' | 'send'
 
 export default function App() {
-  const [tab, setTab]                 = useState<Tab>('marketplace')
-  const { receivables, connected }    = useReceivables()
-  const tokenSymbol                   = useTokenSymbols()
+  const [tab, setTab] = useState<Tab>('marketplace')
 
-  const activeListings    = receivables.filter(r => r.listing).length
-  const totalReceivables  = receivables.length
+  // Fetch contract addresses from the backend so frontend + backend are always in sync
+  const [meantimeAddr, setMeantimeAddr] = useState('')
+  const [usdcAddr,     setUsdcAddr]     = useState('')
+  const [eurcAddr,     setEurcAddr]     = useState('')
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/tokens`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.meantime) setMeantimeAddr(d.meantime)
+        if (d.usdc)     setUsdcAddr(d.usdc)
+        if (d.eurc)     setEurcAddr(d.eurc)
+      })
+      .catch(console.error)
+  }, [])
+
+  const { receivables, connected, updateReceivable } = useReceivables()
+  const tokenSymbol = useTokenSymbols()
+  const { address, chainId, connect, disconnect, switchNetwork } = useWallet()
+
+  const activeListings   = receivables.filter(r => r.listing).length
+  const totalReceivables = receivables.length
+
+  // Don't render the main UI until we have addresses from the backend
+  const ready = meantimeAddr !== ''
 
   return (
     <div className="app">
@@ -29,7 +49,7 @@ export default function App() {
         <div className="header-right">
           <span className="stat-chip">{totalReceivables} receivables</span>
           <span className="stat-chip accent">{activeListings} listings</span>
-          <ConnectButton />
+          <ConnectButton address={address} connect={connect} disconnect={disconnect} />
         </div>
       </header>
 
@@ -37,20 +57,35 @@ export default function App() {
         <button className={tab === 'marketplace' ? 'active' : ''} onClick={() => setTab('marketplace')}>
           Marketplace
         </button>
-        <button className={tab === 'bridge' ? 'active' : ''} onClick={() => setTab('bridge')}>
-          Bridge Simulator
+        <button className={tab === 'send' ? 'active' : ''} onClick={() => setTab('send')}>
+          Send
         </button>
       </nav>
 
       <main>
-        {tab === 'marketplace' && (
+        {!ready && (
+          <div className="status-box" style={{ marginTop: 32 }}>Connecting to backend…</div>
+        )}
+        {ready && tab === 'marketplace' && (
           <Marketplace
             receivables={receivables}
+            meantimeAddr={meantimeAddr as `0x${string}`}
             tokenSymbol={tokenSymbol}
+            userAddress={address}
+            chainId={chainId}
+            usdcAddr={usdcAddr}
+            eurcAddr={eurcAddr}
+            updateReceivable={updateReceivable}
+            switchNetwork={switchNetwork}
           />
         )}
-        {tab === 'bridge' && (
-          <BridgePanel usdcAddr={USDC_ADDR} eurcAddr={EURC_ADDR} />
+        {ready && tab === 'send' && (
+          <SendPanel
+            meantimeAddr={meantimeAddr}
+            userAddress={address}
+            chainId={chainId}
+            switchNetwork={switchNetwork}
+          />
         )}
       </main>
     </div>

@@ -160,6 +160,18 @@ header::after {
   background: rgba(240, 160, 48, 0.05);
 }
 
+/* Connected wallet address display */
+.wallet-address {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--green);
+  padding: 7px 12px;
+  border: 1px solid var(--green-dim);
+  background: rgba(31, 204, 116, 0.05);
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+}
+
 /* Connect button */
 .connect-btn {
   font-family: var(--font-ui);
@@ -334,18 +346,10 @@ section h2 {
   background: rgba(240,160,48,0.06);
 }
 
-/* ── List form ──────────────────────────────────────────────────────────────── */
+/* ── Marketplace card extras ────────────────────────────────────────────────── */
 
-.list-form {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.list-form input {
+.list-price-input {
   flex: 1;
-  min-width: 140px;
   font-family: var(--font-mono);
   font-size: 13px;
   padding: 6px 10px;
@@ -353,9 +357,49 @@ section h2 {
   border: 1px solid var(--border-2);
   color: var(--text-bright);
   outline: none;
+  min-width: 0;
 }
 
-.list-form input:focus { border-color: var(--accent); }
+.list-price-input:focus { border-color: var(--accent); }
+
+.list-token-select {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-2);
+  color: var(--text-bright);
+  cursor: pointer;
+  appearance: none;
+  outline: none;
+  min-width: 70px;
+}
+
+.list-token-select:focus { border-color: var(--accent); }
+
+.owner-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
+.list-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.tx-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  word-break: break-all;
+}
 
 /* ── Marketplace ────────────────────────────────────────────────────────────── */
 
@@ -483,3 +527,110 @@ label select {
 }
 
 .status-box:empty { display: none; }
+
+.status-box.warn {
+  border-left-color: var(--accent);
+  color: var(--accent);
+}
+
+.status-box.err {
+  border-left-color: var(--red);
+  color: var(--red);
+}
+
+.status-box.ok {
+  border-left-color: var(--green);
+  color: var(--green);
+}
+
+/* ── Wallet connected state ──────────────────────────────────────────────────── */
+
+.wallet-connected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.disconnect-btn {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  background: transparent;
+  border: 1px solid var(--border-2);
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 0.15s;
+}
+
+.disconnect-btn:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* ── Send Panel ──────────────────────────────────────────────────────────────── */
+
+.send-panel {
+  max-width: 560px;
+}
+
+.send-panel h2 {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.network-prompt {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  padding: 18px 20px;
+  margin-bottom: 12px;
+}
+
+.network-prompt p {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+
+.network-prompt button {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 8px 20px;
+  background: var(--accent);
+  color: #050810;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.network-prompt button:hover { background: #ffc048; }
+
+.hint.small {
+  font-size: 11px;
+  margin-top: 8px;
+  margin-bottom: 0;
+  padding-left: 0;
+  border-left: none;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+}
+
+.row label { flex: 1; }
+

@@ -265,10 +265,24 @@ contract MeanTimeTest is Test {
         meantime.ownerOf(tokenId);
     }
 
-    function test_SettleEmitsEvent() public {
+    function test_SettleEmitsSettleAttemptedAndSettled() public {
         uint256 tokenId = _mint();
+
+        // Expect SettleAttempted first
+        vm.expectEmit(true, true, false, true);
+        emit MeanTime.SettleAttempted(
+            tokenId,
+            alice,
+            address(usdc),
+            USDC_AMOUNT,
+            block.timestamp,
+            block.timestamp + 1020,
+            USDC_AMOUNT // contract balance == amount
+        );
+        // Then Settled
         vm.expectEmit(true, true, false, true);
         emit MeanTime.Settled(tokenId, alice, address(usdc), USDC_AMOUNT);
+
         meantime.settle(MSG_HASH);
     }
 
@@ -282,6 +296,77 @@ contract MeanTimeTest is Test {
         meantime.settle(MSG_HASH);
         vm.expectRevert(MeanTime.UnknownTransfer.selector);
         meantime.settle(MSG_HASH);
+    }
+
+    function test_SettleRevertsIfInsufficientBalance() public {
+        // Mint the NFT but DON'T fund the contract with USDC
+        vm.prank(bridge);
+        uint256 tokenId = meantime.mint(MSG_HASH, address(usdc), USDC_AMOUNT, alice);
+
+        vm.expectRevert(MeanTime.InsufficientBalance.selector);
+        meantime.settle(MSG_HASH);
+    }
+
+    // ── claim() ────────────────────────────────────────────────────────────────
+
+    function test_ClaimByTokenId() public {
+        uint256 tokenId = _mint();
+        uint256 aliceBefore = usdc.balanceOf(alice);
+
+        meantime.claim(tokenId);
+
+        assertEq(usdc.balanceOf(alice) - aliceBefore, USDC_AMOUNT);
+        // NFT burned
+        vm.expectRevert();
+        meantime.ownerOf(tokenId);
+        // state cleaned up
+        assertEq(meantime.tokenByMessageHash(MSG_HASH), 0);
+        assertEq(meantime.beneficialOwner(tokenId), address(0));
+    }
+
+    function test_ClaimToRelayerAfterFill() public {
+        uint256 tokenId = _mintListAndFill();
+        uint256 relayerUsdcBefore = usdc.balanceOf(relayer);
+
+        // Anyone can call claim, including a random address
+        meantime.claim(tokenId);
+
+        assertEq(usdc.balanceOf(relayer) - relayerUsdcBefore, USDC_AMOUNT);
+    }
+
+    function test_ClaimEmitsEvents() public {
+        uint256 tokenId = _mint();
+
+        vm.expectEmit(true, true, false, true);
+        emit MeanTime.SettleAttempted(
+            tokenId, alice, address(usdc), USDC_AMOUNT, block.timestamp, block.timestamp + 1020, USDC_AMOUNT
+        );
+        vm.expectEmit(true, true, false, true);
+        emit MeanTime.Settled(tokenId, alice, address(usdc), USDC_AMOUNT);
+
+        meantime.claim(tokenId);
+    }
+
+    function test_ClaimRevertsForUnknownToken() public {
+        vm.expectRevert(MeanTime.UnknownTransfer.selector);
+        meantime.claim(999);
+    }
+
+    function test_ClaimRevertsOnDoubleClaim() public {
+        uint256 tokenId = _mint();
+        meantime.claim(tokenId);
+
+        vm.expectRevert(MeanTime.UnknownTransfer.selector);
+        meantime.claim(tokenId);
+    }
+
+    function test_ClaimRevertsIfInsufficientBalance() public {
+        // Mint NFT without funding
+        vm.prank(bridge);
+        uint256 tokenId = meantime.mint(MSG_HASH, address(usdc), USDC_AMOUNT, alice);
+
+        vm.expectRevert(MeanTime.InsufficientBalance.selector);
+        meantime.claim(tokenId);
     }
 
     // ── Edge cases (from spec) ─────────────────────────────────────────────────
@@ -373,6 +458,26 @@ contract MeanTimeTest is Test {
         // attestation arrives — secondary buyer receives USDC
         uint256 buyerBefore = usdc.balanceOf(secondaryBuyer);
         meantime.settle(MSG_HASH);
+        assertEq(usdc.balanceOf(secondaryBuyer) - buyerBefore, USDC_AMOUNT);
+    }
+
+    // claim() also works through secondary market
+    function test_ClaimAfterSecondaryFill() public {
+        address secondaryBuyer = makeAddr("secondaryBuyer");
+        eurc.mint(secondaryBuyer, EURC_PRICE);
+
+        uint256 tokenId = _mintListAndFill();
+
+        vm.prank(relayer);
+        meantime.list(tokenId, EURC_PRICE, address(eurc));
+
+        vm.startPrank(secondaryBuyer);
+        eurc.approve(address(meantime), EURC_PRICE);
+        meantime.fill(tokenId);
+        vm.stopPrank();
+
+        uint256 buyerBefore = usdc.balanceOf(secondaryBuyer);
+        meantime.claim(tokenId); // claim by tokenId
         assertEq(usdc.balanceOf(secondaryBuyer) - buyerBefore, USDC_AMOUNT);
     }
 

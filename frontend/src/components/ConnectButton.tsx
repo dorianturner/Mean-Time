@@ -1,24 +1,25 @@
-declare global {
-  interface Window { ethereum?: { request: (args: { method: string }) => Promise<string[]> } }
+interface Props {
+  address: string | null
+  connect: () => void
+  disconnect: () => void
 }
 
-export function ConnectButton() {
-  const connect = async () => {
-    if (!window.ethereum) {
-      alert('No wallet found. Please install MetaMask.')
-      return
-    }
-    try {
-      await window.ethereum.request({ method: 'eth_requestAccounts' })
-      window.location.reload()
-    } catch (err) {
-      console.error('Connect error:', err)
-    }
+export function ConnectButton({ address, connect, disconnect }: Props) {
+  if (address) {
+    return (
+      <div className="wallet-connected">
+        <span className="wallet-address">
+          {address.slice(0, 6)}…{address.slice(-4)}
+        </span>
+        <button className="disconnect-btn" onClick={disconnect}>
+          Disconnect
+        </button>
+      </div>
+    )
   }
-
   return (
     <button className="connect-btn" onClick={connect}>
-      Connect
+      Connect Wallet
     </button>
   )
 }

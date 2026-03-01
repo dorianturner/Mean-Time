@@ -59,8 +59,9 @@ describe('GET /api/tokens', () => {
     const res = await request(app).get('/api/tokens')
     expect(res.status).toBe(200)
     expect(res.body).toEqual({
-      usdc: '0xUsdcAddress',
-      eurc: '0xEurcAddress',
+      usdc:     '0xUsdcAddress',
+      eurc:     '0xEurcAddress',
+      meantime: '0xMeantimeAddress',
     })
   })
 })
@@ -140,115 +141,6 @@ describe('GET /api/sse', () => {
     expect(data).toContain('event: snapshot')
     expect(data).toContain('data: []')
   }, 5000)
-})
-
-// ── POST /api/bridge/mint ─────────────────────────────────────────────────────
-describe('POST /api/bridge/mint', () => {
-  it('returns 400 when inboundToken is missing', async () => {
-    const { app } = setup()
-    const res = await request(app)
-      .post('/api/bridge/mint')
-      .send({ inboundAmount: '1000000', recipient: '0xAlice' })
-    expect(res.status).toBe(400)
-    expect(res.body.error).toMatch(/inboundToken/)
-  })
-
-  it('returns 400 when inboundToken is not a valid address', async () => {
-    const { app } = setup()
-    const res = await request(app)
-      .post('/api/bridge/mint')
-      .send({ inboundToken: 'notanaddress', inboundAmount: '1000000', recipient: '0xAlice' })
-    expect(res.status).toBe(400)
-  })
-
-  it('returns 400 when recipient is missing', async () => {
-    const { app } = setup()
-    const res = await request(app)
-      .post('/api/bridge/mint')
-      .send({ inboundToken: '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D', inboundAmount: '1000000' })
-    expect(res.status).toBe(400)
-    expect(res.body.error).toMatch(/recipient/)
-  })
-
-  it('returns 400 when inboundAmount is missing', async () => {
-    const { app } = setup()
-    const res = await request(app)
-      .post('/api/bridge/mint')
-      .send({
-        inboundToken: '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D',
-        recipient:    '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D',
-      })
-    expect(res.status).toBe(400)
-    expect(res.body.error).toMatch(/inboundAmount/)
-  })
-
-  it('calls writeContract and returns txHash on valid body', async () => {
-    const { app, ctx } = setup()
-    const res = await request(app)
-      .post('/api/bridge/mint')
-      .send({
-        inboundToken:  '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D',
-        recipient:     '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D',
-        inboundAmount: '1000000',
-      })
-
-    expect(res.status).toBe(200)
-    expect(res.body.txHash).toBe('0xdeadbeeftxhash')
-    expect(ctx.walletClient.writeContract).toHaveBeenCalledOnce()
-  })
-
-  it('uses provided cctpMessageHash when it is a hex string', async () => {
-    const { app, ctx } = setup()
-    const hash = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-    await request(app)
-      .post('/api/bridge/mint')
-      .send({
-        cctpMessageHash: hash,
-        inboundToken:    '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D',
-        recipient:       '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D',
-        inboundAmount:   '1000000',
-      })
-
-    const call = (ctx.walletClient.writeContract as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(call.args[0]).toBe(hash)
-  })
-
-  it('keccak256s a non-hex cctpMessageHash', async () => {
-    const { app, ctx } = setup()
-    await request(app)
-      .post('/api/bridge/mint')
-      .send({
-        cctpMessageHash: 'my-cctp-message-id',
-        inboundToken:    '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D',
-        recipient:       '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D',
-        inboundAmount:   '1000000',
-      })
-
-    const call = (ctx.walletClient.writeContract as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    // Should be a 0x-prefixed 32-byte hex
-    expect(call.args[0]).toMatch(/^0x[0-9a-f]{64}$/)
-  })
-
-  it('returns 500 when writeContract throws', async () => {
-    const ctx = mockCtx({
-      walletClient: {
-        writeContract: vi.fn().mockRejectedValue(new Error('chain error')),
-      } as unknown as ReturnType<typeof mockCtx>['walletClient'],
-    })
-    const store = createStore()
-    const app   = createApp(ctx, store)
-
-    const res = await request(app)
-      .post('/api/bridge/mint')
-      .send({
-        inboundToken:  '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D',
-        recipient:     '0x18b2F69F554dcBdc0aF1A7Eaf3540075327A477D',
-        inboundAmount: '1000000',
-      })
-
-    expect(res.status).toBe(500)
-    expect(res.body.error).toMatch(/chain error/)
-  })
 })
 
 // ── POST /api/bridge/settle ───────────────────────────────────────────────────
