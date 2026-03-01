@@ -3,6 +3,7 @@ import { buildCtx }     from './ctx.js'
 import { createStore }  from './store.js'
 import { backfillStore, startWatcher } from './watcher.js'
 import { createApp }    from './app.js'
+import { recoverSettlements } from './attestationPoller.js'
 
 const PORT = Number(process.env.PORT ?? 3001)
 
@@ -14,6 +15,17 @@ backfillStore(ctx, store).catch((err) => {
   console.warn('[backfill] Failed (non-fatal, live watcher will still run):', err.message ?? err)
 }).then(() => {
   const stopWatcher = startWatcher(ctx, store)
+<<<<<<< Updated upstream
+=======
+
+  // Recover any attestations that completed (or are in-flight) while backend was down
+  console.log('[startup] Starting attestation recovery…')
+  recoverSettlements(ctx, store).then(() => {
+    console.log('[startup] Recovery finished')
+  }).catch((err) => {
+    console.warn('[recovery] Failed (non-fatal):', err)
+  })
+>>>>>>> Stashed changes
 
   const app = createApp(ctx, store)
 

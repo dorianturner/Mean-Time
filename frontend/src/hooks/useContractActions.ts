@@ -10,7 +10,7 @@ import {
 } from 'viem'
 import { MEANTIME_ABI, ERC20_ABI } from '../abi.js'
 
-const MEANTIME_ADDR = (import.meta.env.VITE_MEANTIME_ADDR ?? '0xff022c195F9e3bA7c16ac5DEE5c42579928eAC59') as `0x${string}`
+const MEANTIME_ADDR = (import.meta.env.VITE_MEANTIME_ADDR ?? '0x7b3ae61DAe4bFB32A0bF1A79518337a63cBF1Acc') as `0x${string}`
 
 const ARC_CHAIN = {
   id:   5042002,
