@@ -1,4 +1,4 @@
-# InstantSettle
+# MeanTime
 
 Tokenised CCTP receivables. Every cross-chain USDC transfer becomes a tradeable on-chain asset during the ~17-minute attestation window.
 
@@ -33,18 +33,18 @@ For frontend internals see [frontend/README.md](frontend/README.md).
 
 When USDC is bridged from Ethereum to Arc via CCTP Standard Transfer, Circle requires 65 block confirmations before releasing funds on the destination chain. That takes 15-19 minutes. During that window the receiver has no money and no position.
 
-InstantSettle mints an ERC-721 NFT the moment the source-chain burn is detected. That NFT represents the incoming USDC, and it can be traded immediately.
+MeanTime mints an ERC-721 NFT the moment the source-chain burn is detected. That NFT represents the incoming USDC, and it can be traded immediately.
 
 ```
 Ethereum: user burns USDC via CCTP
           |
-Arc:      InstantSettle mints NFT (face value = inbound USDC)
+Arc:      MeanTime mints NFT (face value = inbound USDC)
           |
           +--- receiver holds NFT --- waits ~17 min --- redeems full USDC
           |
-          +--- receiver lists NFT at a price in EURC
+          +--- receiver lists NFT at a price in ARC (native token)
                     |
-                    relayer fills: receiver gets EURC instantly (< 1s on Arc)
+                    relayer fills: receiver gets ARC instantly (< 1s on Arc)
                     |
                     Circle attestation arrives: relayer gets the full USDC
 ```
