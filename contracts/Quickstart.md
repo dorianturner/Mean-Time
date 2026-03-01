@@ -1,16 +1,15 @@
-# Quickstart
+# Contracts Quickstart
 
 ## Prerequisites
 
-- Git
-- Bash (macOS / Linux / WSL)
-- A funded Arc testnet wallet (for deployment only)
+- Git and Bash (macOS/Linux/WSL)
+- A funded Arc testnet wallet (for deployment)
 
-Foundry does **not** need to be pre-installed — `setup.sh` handles it.
+Foundry does not need to be installed first -- `setup.sh` handles it.
 
 ---
 
-## First-time setup
+## Setup
 
 Run once from the **repo root**:
 
@@ -18,120 +17,117 @@ Run once from the **repo root**:
 bash setup.sh
 ```
 
-This installs Foundry, pulls all dependencies (`forge-std`, `openzeppelin-contracts`), and builds the contracts. If `forge` is not found after setup, open a new terminal or run `source ~/.bashrc`.
+This installs Foundry, initialises git submodules (`forge-std`, `openzeppelin-contracts`), and compiles the contracts. If `forge` is not on your PATH after setup, open a new terminal or run `source ~/.bashrc`.
 
 ---
 
-## Building
-
-From the repo root:
+## Build
 
 ```bash
-forge build
+forge build              # compile
+forge build --sizes      # compile and print contract sizes (matches CI)
 ```
 
-To also print compiled contract sizes (same as CI):
+All Forge commands run from the repo root. The root `foundry.toml` points Forge at the `contracts/` directory.
+
+---
+
+## Test
 
 ```bash
-forge build --sizes
+forge test -vvv                                    # all tests, with traces on failure
+forge test --match-contract MeanTimeTest -vvv      # one test file
+forge test --match-test test_FillAndSettle -vvv    # one test function
+```
+
+`-vvv` prints full execution traces on failure. Drop it for a summary.
+
+---
+
+## Format
+
+```bash
+forge fmt             # auto-format
+forge fmt --check     # check only (fails in CI if any files need changes)
 ```
 
 ---
 
-## Running tests
+## Write a Test
 
-From the repo root:
-
-```bash
-forge test -vvv
-```
-
-Run a specific test file by contract name:
-
-```bash
-forge test --match-contract HelloArcTest -vvv
-```
-
-Run a single test function:
-
-```bash
-forge test --match-test test_UpdateMessage -vvv
-```
-
-`-vvv` prints a full execution trace on failure. Omit for a summary only.
-
----
-
-## Writing tests
-
-Test files live in `contracts/test/` and must end in `.t.sol`. Extend `forge-std/Test.sol`. Any function prefixed `test` is a test case; `setUp()` runs before each one.
+Test files live in `contracts/test/` and must end in `.t.sol`. Extend `forge-std/Test.sol`.
 
 ```solidity
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.33;
 
 import {Test} from "forge-std/Test.sol";
-import {MyContract} from "../src/MyContract.sol";
+import {MeanTime} from "../src/MeanTime.sol";
+import {MockERC20} from "../src/MockERC20.sol";
 
-contract MyContractTest is Test {
-    MyContract public c;
+contract ExampleTest is Test {
+    MeanTime public meantime;
+    MockERC20 public usdc;
+    address public bridge = address(0xBEEF);
 
     function setUp() public {
-        c = new MyContract();
+        usdc = new MockERC20("USD Coin", "USDC", 6);
+        meantime = new MeanTime(bridge);
     }
 
-    function test_SomeBehaviour() public {
-        assertEq(c.value(), 42);
+    function test_MintCreatesReceivable() public {
+        bytes32 msgHash = keccak256("test");
+        vm.prank(bridge);
+        uint256 tokenId = meantime.mint(msgHash, address(usdc), 100e6, address(this));
+
+        assertEq(meantime.beneficialOwner(tokenId), address(this));
     }
 }
 ```
 
----
-
-## Formatting
-
-Check formatting (enforced in CI):
-
-```bash
-forge fmt --check
-```
-
-Auto-fix:
-
-```bash
-forge fmt
-```
+Any function prefixed with `test` is a test case. `setUp()` runs before each one.
 
 ---
 
-## Deploying to Arc testnet
+## Deploy to Arc Testnet
 
-Add your private key to `.env` at the repo root:
+Add credentials to `.env` at the repo root:
 
 ```
-ARC_RPC_URL=https://rpc.testnet.arc.network
+ARC_RPC_URL=https://rpc.blockdaemon.testnet.arc.network
 PRIVATE_KEY=0xyour_key_here
 ```
 
-Then:
+Deploy:
 
 ```bash
 source .env
-forge script contracts/scripts/DeployHello.s.sol:DeployHello --rpc-url $ARC_RPC_URL --broadcast
+forge script contracts/scripts/DeployMeanTime.s.sol:DeployMeanTime \
+  --rpc-url $ARC_RPC_URL \
+  --broadcast
 ```
+
+After deployment, update `deployments.json` at the repo root with the new contract addresses. The backend reads this file on startup.
 
 ---
 
-## Project layout
+## Project Layout
 
 ```
 foundry.toml              # Root Foundry config (run forge from here)
 contracts/
-├── src/                  # Contract source files
-├── test/                 # Forge test files (*.t.sol)
-├── scripts/              # Deployment scripts (*.s.sol)
-├── lib/                  # Dependencies (managed via git submodules)
-└── foundry.toml          # Inner config (used when running forge from contracts/)
+  src/
+    MeanTime.sol          # Main contract
+    MockERC20.sol         # Mintable ERC-20 for testnet
+  test/
+    MeanTime.t.sol        # Foundry tests
+  scripts/
+    DeployMeanTime.s.sol  # Deployment script
+  lib/
+    forge-std/            # Forge standard library (git submodule)
+    openzeppelin-contracts/ # OpenZeppelin (git submodule)
+  Specification.md        # Full contract design spec
+  Quickstart.md           # This file
 ```
 
-The full contract design spec is in `contracts/README.md`.
+See [Specification.md](Specification.md) for the complete design spec and edge case analysis.
