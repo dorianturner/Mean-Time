@@ -1,24 +1,24 @@
 /* ─────────────────────────────────────────────────────────────────────────────
    MeanTime — Trading Terminal UI
-   Aesthetic: institutional fintech, Bloomberg-meets-DeFi, precise & edgy
+   Aesthetic: institutional fintech, clean light mode
    Fonts: Barlow Condensed (display/UI) · Barlow (body) · DM Mono (data)
 ───────────────────────────────────────────────────────────────────────────── */
 
 :root {
-  --bg:         #060a0e;
-  --surface:    #0b1118;
-  --surface-2:  #101820;
-  --border:     #162030;
-  --border-2:   #1e2e42;
-  --text:       #b8cfe0;
-  --text-dim:   #4a6070;
-  --text-bright:#e8f4ff;
-  --accent:     #f0a030;
-  --accent-dim: #7a4e10;
-  --green:      #1fcc74;
-  --green-dim:  #0a3d22;
-  --red:        #e84040;
-  --blue:       #3a9fd6;
+  --bg:         #f4f6f9;
+  --surface:    #ffffff;
+  --surface-2:  #eef1f6;
+  --border:     #d8e0eb;
+  --border-2:   #c0ccdb;
+  --text:       #2c3e52;
+  --text-dim:   #7a90a8;
+  --text-bright:#0f1f30;
+  --accent:     #d97706;
+  --accent-dim: #fef3c7;
+  --green:      #059669;
+  --green-dim:  #d1fae5;
+  --red:        #dc2626;
+  --blue:       #2563eb;
 
   --font-ui:   'Barlow Condensed', sans-serif;
   --font-body: 'Barlow', sans-serif;
@@ -35,10 +35,10 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
-  /* Subtle grid texture */
+  /* Subtle ruled-paper grid */
   background-image:
-    linear-gradient(rgba(30,46,66,0.25) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(30,46,66,0.25) 1px, transparent 1px);
+    linear-gradient(rgba(192, 204, 219, 0.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(192, 204, 219, 0.3) 1px, transparent 1px);
   background-size: 40px 40px;
 }
 
@@ -52,8 +52,8 @@ body {
 }
 
 @keyframes pulse-green {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(31, 204, 116, 0.5); }
-  50%       { box-shadow: 0 0 0 5px rgba(31, 204, 116, 0);  }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.4); }
+  50%       { box-shadow: 0 0 0 5px rgba(5, 150, 105, 0);  }
 }
 
 @keyframes pulse-red {
@@ -94,7 +94,7 @@ header::after {
   position: absolute;
   top: 0; left: 0;
   width: 60px; height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(240,160,48,0.05), transparent);
+  background: linear-gradient(90deg, transparent, rgba(217, 119, 6, 0.06), transparent);
   animation: scanline 4s ease-in-out infinite;
   pointer-events: none;
 }
@@ -155,9 +155,9 @@ header::after {
 }
 
 .stat-chip.accent {
-  border-color: var(--accent-dim);
+  border-color: #f6c95e;
   color: var(--accent);
-  background: rgba(240, 160, 48, 0.05);
+  background: var(--accent-dim);
 }
 
 /* Connected wallet address display */
@@ -166,8 +166,8 @@ header::after {
   font-size: 12px;
   color: var(--green);
   padding: 7px 12px;
-  border: 1px solid var(--green-dim);
-  background: rgba(31, 204, 116, 0.05);
+  border: 1px solid #a7f3d0;
+  background: var(--green-dim);
   border-radius: 2px;
   letter-spacing: 0.04em;
 }
@@ -181,7 +181,7 @@ header::after {
   text-transform: uppercase;
   padding: 7px 18px;
   background: var(--accent);
-  color: #050810;
+  color: #ffffff;
   border: none;
   border-radius: 2px;
   cursor: pointer;
@@ -189,7 +189,7 @@ header::after {
 }
 
 .connect-btn:hover {
-  background: #ffc048;
+  background: #b45309;
   transform: translateY(-1px);
 }
 
@@ -256,13 +256,14 @@ section h2 {
   border-left: 3px solid var(--border-2);
   padding: 14px 16px;
   margin-bottom: 6px;
-  transition: border-left-color 0.2s, background 0.2s;
+  transition: border-left-color 0.2s, background 0.2s, box-shadow 0.2s;
   animation: fadeUp 0.3s ease both;
 }
 
 .card:hover {
   border-left-color: var(--accent);
   background: var(--surface-2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
 }
 
 .card-header {
@@ -310,8 +311,8 @@ section h2 {
   text-transform: uppercase;
   color: var(--blue);
   padding: 3px 8px;
-  border: 1px solid rgba(58,159,214,0.3);
-  background: rgba(58,159,214,0.07);
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  background: rgba(37, 99, 235, 0.06);
 }
 
 .empty {
@@ -343,7 +344,7 @@ section h2 {
 .card button:hover {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(240,160,48,0.06);
+  background: var(--accent-dim);
 }
 
 /* ── Marketplace card extras ────────────────────────────────────────────────── */
@@ -440,10 +441,13 @@ section h2 {
   padding: 18px 20px;
   margin-bottom: 12px;
   animation: fadeUp 0.35s ease both;
-  transition: border-left-color 0.2s;
+  transition: border-left-color 0.2s, box-shadow 0.2s;
 }
 
-.form-group:hover { border-left-color: var(--accent-dim); }
+.form-group:hover {
+  border-left-color: #f6c95e;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
 
 .form-group h3 {
   font-family: var(--font-ui);
@@ -487,7 +491,7 @@ label select:focus { border-color: var(--accent); }
 label select {
   cursor: pointer;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%234a6070'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237a90a8'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
 }
@@ -509,7 +513,7 @@ label select {
 
 .form-group > button:hover {
   background: var(--accent);
-  color: #050810;
+  color: #ffffff;
 }
 
 .status-box {
@@ -531,16 +535,19 @@ label select {
 .status-box.warn {
   border-left-color: var(--accent);
   color: var(--accent);
+  background: var(--accent-dim);
 }
 
 .status-box.err {
   border-left-color: var(--red);
   color: var(--red);
+  background: #fee2e2;
 }
 
 .status-box.ok {
   border-left-color: var(--green);
   color: var(--green);
+  background: var(--green-dim);
 }
 
 /* ── Wallet connected state ──────────────────────────────────────────────────── */
@@ -569,6 +576,7 @@ label select {
 .disconnect-btn:hover {
   border-color: var(--red);
   color: var(--red);
+  background: #fee2e2;
 }
 
 /* ── Send Panel ──────────────────────────────────────────────────────────────── */
@@ -611,13 +619,13 @@ label select {
   text-transform: uppercase;
   padding: 8px 20px;
   background: var(--accent);
-  color: #050810;
+  color: #ffffff;
   border: none;
   cursor: pointer;
   transition: background 0.15s;
 }
 
-.network-prompt button:hover { background: #ffc048; }
+.network-prompt button:hover { background: #b45309; }
 
 .hint.small {
   font-size: 11px;
@@ -633,4 +641,3 @@ label select {
 }
 
 .row label { flex: 1; }
-

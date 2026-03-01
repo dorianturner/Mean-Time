@@ -19,8 +19,9 @@ contract DeployMeanTime is Script {
         // In production replace with the CCTP MessageTransmitter address on Arc.
         MeanTime meantime = new MeanTime(deployer);
 
-        // Give the deployer a EURC float so the backend can fund test relayers.
-        eurc.mint(deployer, 1_000_000 * 1e6);
+        // Give the deployer a float for testing (USDC + EURC).
+        usdc.mint(deployer, 500 * 1e6);
+        eurc.mint(deployer, 500 * 1e6);
 
         vm.stopBroadcast();
 

@@ -9,3 +9,6 @@ remappings = [
     "forge-std/=contracts/lib/forge-std/src/",
 ]
 fs_permissions = [{ access = "write", path = "./deployments.json" }]
+via_ir = true
+optimizer = true
+optimizer_runs = 200
