@@ -4,6 +4,8 @@
 
 MeanTime is built on [Circle's](https://www.circle.com) CCTP (Cross-Chain Transfer Protocol), USDC, EURC, and Bridge Kit — running on **Arc Testnet** with **Ethereum Sepolia** as the source chain.
 
+Made for the Encode x Arc hackathon 27th Feb - 1st March
+
 > **Submission context:** Functional MVP with a working frontend, backend, smart contracts, architecture diagrams, and full documentation covering core functions and use of Circle's tools.
 
 ---
@@ -405,4 +407,5 @@ VITE_API_BASE=https://your-backend.example.com npm run build
 ## License
 
 MIT
+
 
