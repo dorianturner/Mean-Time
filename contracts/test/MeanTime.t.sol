@@ -339,13 +339,7 @@ contract MeanTimeTest is Test {
 
         vm.expectEmit(true, true, false, true);
         emit MeanTime.SettleAttempted(
-            tokenId,
-            alice,
-            address(usdc),
-            USDC_AMOUNT,
-            block.timestamp,
-            block.timestamp + 1020,
-            USDC_AMOUNT
+            tokenId, alice, address(usdc), USDC_AMOUNT, block.timestamp, block.timestamp + 1020, USDC_AMOUNT
         );
         vm.expectEmit(true, true, false, true);
         emit MeanTime.Settled(tokenId, alice, address(usdc), USDC_AMOUNT);

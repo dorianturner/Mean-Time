@@ -215,13 +215,7 @@ contract MeanTime is ERC721 {
         // contractBalance is the ERC-20 balance of inboundToken held by this contract.
         uint256 contractBalance = IERC20(token).balanceOf(address(this));
         emit SettleAttempted(
-            tokenId,
-            recipient,
-            token,
-            amount,
-            block.timestamp,
-            mintedAt + ESTIMATED_ATTESTATION_TIME,
-            contractBalance
+            tokenId, recipient, token, amount, block.timestamp, mintedAt + ESTIMATED_ATTESTATION_TIME, contractBalance
         );
 
         // Revert early with a clear error if balance is insufficient.
