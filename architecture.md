@@ -1,6 +1,5 @@
 # Architecture
 
-<<<<<<< HEAD
 MeanTime is a three-tier protocol: a **Solidity smart contract** on Arc, a **Node.js backend**, and a **React frontend**. The backend acts as the glue between Circle's off-chain attestation API and the on-chain settlement logic.
 
 ---
@@ -18,9 +17,6 @@ MeanTime is a three-tier protocol: a **Solidity smart contract** on Arc, a **Nod
 - [Security Model](#security-model)
 - [Why Arc](#why-arc)
 - [Testnet Limitations](#testnet-limitations)
-=======
-MeanTime is a three-tier protocol: a Solidity contract on Arc, a Node.js backend, and a React frontend. The backend acts as the glue between Circle's off-chain attestation API and the on-chain settlement logic.
->>>>>>> 5c24d110da6e71cac5f9439beed830a048198b20
 
 ---
 
