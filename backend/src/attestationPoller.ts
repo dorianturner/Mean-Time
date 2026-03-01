@@ -93,6 +93,7 @@ export async function autoSettle(
 
 export async function pollAttestation(
   ctx: AppCtx, store: Store, messageHash: `0x${string}`, messageBytes?: `0x${string}`,
+  _sourceTxHash?: string, _sourceDomain?: number,
 ): Promise<void> {
   const key = messageHash.toLowerCase()
   if (activePollers.has(key)) { console.log(`[attestation] Poller already active for ${messageHash}, skipping`); return }

@@ -84,6 +84,8 @@ export default function App() {
             meantimeAddr={meantimeAddr}
             userAddress={address}
             chainId={chainId}
+            usdcAddr={usdcAddr}
+            eurcAddr={eurcAddr}
             switchNetwork={switchNetwork}
           />
         )}
