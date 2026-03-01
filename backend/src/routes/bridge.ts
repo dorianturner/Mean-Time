@@ -8,7 +8,7 @@ import { isHex, keccak256, toBytes } from 'viem'
 import { type AppCtx } from '../ctx.js'
 import { type Store } from '../store.js'
 import { MEANTIME_ABI } from '../abi.js'
-import { trackSepoliaTx } from '../sepoliaWatcher.js'
+import { trackSepoliaTx, intendedRecipients } from '../sepoliaWatcher.js'
 
 export function buildBridgeRouter(ctx: AppCtx, store: Store): Router {
   const router = Router()
@@ -54,6 +54,12 @@ export function buildBridgeRouter(ctx: AppCtx, store: Store): Router {
       if (!txHash || !isHex(txHash)) {
         res.status(400).json({ error: 'txHash must be a 0x hex string' })
         return
+      }
+
+      // Register the intended recipient BEFORE anything else so the background
+      // Sepolia watcher uses it if it processes this burn first.
+      if (recipient && /^0x[0-9a-fA-F]{40}$/.test(recipient)) {
+        intendedRecipients.set(txHash.toLowerCase(), recipient as `0x${string}`)
       }
 
       // Start tracking in background; respond immediately so UI doesn't time out

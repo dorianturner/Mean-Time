@@ -1,19 +1,18 @@
 // Polls Circle's attestation API for a given CCTP messageHash.
 // When attestation is ready, completes the CCTP flow on Arc:
-//   1. If Arc has a real MessageTransmitter: calls receiveMessage(message, attestation)
+//   1. If ARC_MESSAGE_TRANSMITTER is set: calls receiveMessage(message, attestation)
 //      to mint real USDC to MeanTime.
-//   2. Fallback (mock): mints MockERC20 USDC to MeanTime using the deployer key.
-// Then calls MeanTime.settle(messageHash) to pay the beneficial owner.
+//   2. Fallback: mints MockERC20 USDC to MeanTime directly (deployer is owner).
+// Then calls MeanTime.settle(messageHash) to pay the current beneficial owner.
 
 import { type AppCtx, ARC_CCTP } from './ctx.js'
 import { type Store } from './store.js'
-import { MEANTIME_ABI } from './abi.js'
+import { MEANTIME_ABI, ERC20_MINT_ABI } from './abi.js'
 
-const ATTESTATION_API = 'https://iris-api-sandbox.circle.com/attestations'
+const ATTESTATION_API  = 'https://iris-api-sandbox.circle.com/attestations'
 const POLL_INTERVAL_MS = 30_000   // 30 seconds
 const MAX_ATTEMPTS     = 60       // ~30 min max wait
 
-// Minimal ABI for Circle's MessageTransmitter.receiveMessage
 const MESSAGE_TRANSMITTER_ABI = [
   {
     type: 'function',
@@ -27,23 +26,9 @@ const MESSAGE_TRANSMITTER_ABI = [
   },
 ] as const
 
-// Minimal ABI for MockERC20.mint(address to, uint256 amount)
-const MOCK_ERC20_ABI = [
-  {
-    type: 'function',
-    name: 'mint',
-    inputs: [
-      { name: 'to',     type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-] as const
-
 interface AttestationResponse {
-  status:      string        // 'pending_confirmations' | 'complete'
-  attestation: string | null // hex string when complete
+  status:      string
+  attestation: string | null
 }
 
 export async function pollAttestation(
@@ -61,11 +46,9 @@ export async function pollAttestation(
       const res = await fetch(`${ATTESTATION_API}/${messageHash}`)
 
       if (res.status === 404) {
-        // Normal during early confirmation window
         console.log(`[attestation] ${messageHash}: pending (attempt ${attempt + 1})`)
         continue
       }
-
       if (!res.ok) {
         console.warn(`[attestation] API returned ${res.status}`)
         continue
@@ -78,7 +61,7 @@ export async function pollAttestation(
         continue
       }
 
-      console.log(`[attestation] ${messageHash}: COMPLETE — settling…`)
+      console.log(`[attestation] ${messageHash}: COMPLETE`)
       await settle(ctx, store, messageHash, messageBytes, body.attestation as `0x${string}`)
       return
     } catch (err) {
@@ -86,7 +69,7 @@ export async function pollAttestation(
     }
   }
 
-  console.error(`[attestation] Gave up waiting for ${messageHash} after ${MAX_ATTEMPTS} attempts`)
+  console.error(`[attestation] Gave up on ${messageHash} after ${MAX_ATTEMPTS} attempts`)
 }
 
 async function settle(
@@ -96,7 +79,7 @@ async function settle(
   messageBytes: `0x${string}`,
   attestation: `0x${string}`,
 ): Promise<void> {
-  // Look up tokenId from messageHash
+  // Look up which tokenId corresponds to this messageHash
   const tokenId = await ctx.publicClient.readContract({
     address:      ctx.addresses.meantime,
     abi:          MEANTIME_ABI,
@@ -105,27 +88,29 @@ async function settle(
   }).catch(() => 0n) as bigint
 
   if (tokenId === 0n) {
-    console.warn(`[settle] No NFT found for messageHash ${messageHash}`)
+    console.warn(`[settle] No NFT found for ${messageHash}`)
     return
   }
 
-  // Read the NFT data to get inboundAmount and inboundToken
-  const [, data] = await ctx.publicClient.readContract({
+  // Read inboundToken + inboundAmount from the NFT
+  const nftData = await ctx.publicClient.readContract({
     address:      ctx.addresses.meantime,
     abi:          MEANTIME_ABI,
-    functionName: 'getReceivable',
+    functionName: 'nftData',
     args:         [tokenId],
-  }) as [string, { cctpMessageHash: `0x${string}`; inboundToken: `0x${string}`; inboundAmount: bigint; mintedAt: bigint }, unknown, bigint, bigint]
+  }) as readonly [`0x${string}`, `0x${string}`, bigint, bigint]
+  // nftData = [cctpMessageHash, inboundToken, inboundAmount, mintedAt]
+  const inboundToken  = nftData[1]
+  const inboundAmount = nftData[2]
 
-  const { inboundToken, inboundAmount } = data
+  console.log(`[settle] tokenId=${tokenId} inboundToken=${inboundToken} amount=${inboundAmount}`)
 
-  // Step 1: Get USDC into MeanTime
+  // Step 1: get USDC into the MeanTime contract
   const arcMT = ARC_CCTP.messageTransmitter
   if (arcMT) {
-    // Try real CCTP receive on Arc
     try {
-      console.log(`[settle] Calling Arc MessageTransmitter.receiveMessage…`)
-      const txHash = await ctx.walletClient.writeContract({
+      console.log('[settle] Trying Arc MessageTransmitter.receiveMessage…')
+      const tx = await ctx.walletClient.writeContract({
         address:      arcMT,
         abi:          MESSAGE_TRANSMITTER_ABI,
         functionName: 'receiveMessage',
@@ -133,22 +118,21 @@ async function settle(
         account:      ctx.account,
         chain:        null,
       })
-      await ctx.publicClient.waitForTransactionReceipt({ hash: txHash })
-      console.log(`[settle] receiveMessage OK (${txHash})`)
+      await ctx.publicClient.waitForTransactionReceipt({ hash: tx })
+      console.log(`[settle] receiveMessage OK (${tx})`)
     } catch (err) {
-      console.warn(`[settle] receiveMessage failed, falling back to mock mint:`, err)
-      await mockMintUsdc(ctx, inboundToken, inboundAmount)
+      console.warn('[settle] receiveMessage failed, falling back to mock mint:', (err as Error).message)
+      await mockMint(ctx, inboundToken, inboundAmount)
     }
   } else {
-    // Fallback: mint MockERC20 directly
-    console.log(`[settle] No Arc MessageTransmitter configured — using mock USDC mint`)
-    await mockMintUsdc(ctx, inboundToken, inboundAmount)
+    console.log('[settle] No Arc MessageTransmitter — minting mock USDC to MeanTime')
+    await mockMint(ctx, inboundToken, inboundAmount)
   }
 
-  // Step 2: Call settle() on MeanTime
+  // Step 2: settle — pays current beneficial owner and burns NFT
   try {
     console.log(`[settle] Calling MeanTime.settle(${messageHash})…`)
-    const txHash = await ctx.walletClient.writeContract({
+    const tx = await ctx.walletClient.writeContract({
       address:      ctx.addresses.meantime,
       abi:          MEANTIME_ABI,
       functionName: 'settle',
@@ -156,31 +140,31 @@ async function settle(
       account:      ctx.account,
       chain:        null,
     })
-    await ctx.publicClient.waitForTransactionReceipt({ hash: txHash })
-    console.log(`[settle] Settlement complete (${txHash})`)
+    await ctx.publicClient.waitForTransactionReceipt({ hash: tx })
+    console.log(`[settle] Done (${tx})`)
   } catch (err) {
-    console.error(`[settle] settle() failed:`, err)
+    console.error('[settle] settle() failed:', err)
   }
 }
 
-async function mockMintUsdc(
+async function mockMint(
   ctx: AppCtx,
   inboundToken: `0x${string}`,
   amount: bigint,
 ): Promise<void> {
   try {
-    const txHash = await ctx.walletClient.writeContract({
+    const tx = await ctx.walletClient.writeContract({
       address:      inboundToken,
-      abi:          MOCK_ERC20_ABI,
+      abi:          ERC20_MINT_ABI,
       functionName: 'mint',
       args:         [ctx.addresses.meantime, amount],
       account:      ctx.account,
       chain:        null,
     })
-    await ctx.publicClient.waitForTransactionReceipt({ hash: txHash })
-    console.log(`[settle] Mock USDC minted to MeanTime (${txHash})`)
+    await ctx.publicClient.waitForTransactionReceipt({ hash: tx })
+    console.log(`[settle] Mock mint OK (${tx})`)
   } catch (err) {
-    console.error(`[settle] Mock mint failed:`, err)
+    console.error('[settle] Mock mint failed:', err)
   }
 }
 

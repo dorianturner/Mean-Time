@@ -27,6 +27,17 @@ function encodeApprove(spender: string, amount: bigint): string {
   return sig + spender.replace('0x', '').padStart(64, '0') + amount.toString(16).padStart(64, '0')
 }
 
+/** Read an ERC-20 balance via eth_call without signing. */
+async function erc20Balance(token: string, owner: string): Promise<bigint> {
+  if (!window.ethereum) return 0n
+  const data = '0x70a08231' + owner.replace('0x', '').padStart(64, '0')
+  const result = await window.ethereum.request({
+    method: 'eth_call',
+    params: [{ to: token, data }, 'latest'],
+  }) as string
+  return result && result !== '0x' ? BigInt(result) : 0n
+}
+
 async function sendTx(from: string, to: string, data: string) {
   if (!window.ethereum) throw new Error('No wallet')
   return window.ethereum.request({
@@ -90,12 +101,6 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
     ? receivables.filter(r => r.listing && r.beneficialOwner.toLowerCase() === userAddress)
     : []
   const listed = receivables.filter(r => r.listing)
-  // Unlisted receivables owned by others (or all unlisted if not connected)
-  const othersUnlisted = receivables.filter(r => {
-    if (r.listing) return false
-    if (userAddress && r.beneficialOwner.toLowerCase() === userAddress) return false
-    return true
-  })
 
   const setStatus = (key: string, msg: string) => setTxStatus(s => ({ ...s, [key]: msg }))
   const setBusyKey = (key: string, val: boolean) => setBusy(s => ({ ...s, [key]: val }))
@@ -165,6 +170,16 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
     setStatus(key, 'Step 1/3: switch to Arc…')
     try {
       if (!await ensureArc()) { setStatus(key, 'Switch to Arc to fill.'); return }
+
+      // Pre-flight: check filler has enough payment token
+      const needed  = BigInt(r.listing.reservePrice)
+      const balance = await erc20Balance(r.listing.paymentToken, userAddress)
+      if (balance < needed) {
+        const sym = tokenSymbol(r.listing.paymentToken)
+        setStatus(key, `Insufficient ${sym}. Need ${(Number(needed) / 1e6).toFixed(2)} but have ${(Number(balance) / 1e6).toFixed(2)}.`)
+        return
+      }
+
       setStatus(key, 'Step 1/2: approve payment token…')
       const approveData = encodeApprove(meantimeAddr, BigInt(r.listing.reservePrice))
       const approveTx = await sendTx(userAddress, r.listing.paymentToken, approveData)
@@ -293,26 +308,6 @@ export function Marketplace({ receivables, meantimeAddr, tokenSymbol, userAddres
         })}
       </section>
 
-      {/* Unlisted receivables owned by others — always visible */}
-      {othersUnlisted.length > 0 && (
-        <section>
-          <h2>Unlisted Receivables</h2>
-          {othersUnlisted.map(r => (
-            <div key={r.tokenId} className="card">
-              <div className="card-header">
-                <span>#{r.tokenId}</span>
-                <span>{(Number(r.inboundAmount) / 1e6).toFixed(2)} {tokenSymbol(r.inboundToken)}</span>
-              </div>
-              <div className="card-body">
-                <span className="status">Awaiting listing</span>
-                <span className="owner-hint">
-                  Owner: {r.beneficialOwner.slice(0, 6)}…{r.beneficialOwner.slice(-4)}
-                </span>
-              </div>
-            </div>
-          ))}
-        </section>
-      )}
     </div>
   )
 }

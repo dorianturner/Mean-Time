@@ -1,141 +1,142 @@
 import { useState } from 'react'
 import { API_BASE } from '../config.js'
 
-// Sepolia CCTP v1 contracts
-const SEPOLIA_CHAIN_ID = 11155111
-const SEPOLIA_USDC     = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'
+// Sepolia CCTP v1 contracts (Circle official)
+const SEPOLIA_CHAIN_ID        = 11155111
+const SEPOLIA_USDC            = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'
 const SEPOLIA_TOKEN_MESSENGER = '0x9f3B8679c73C2Fef8b59B4f3444d4e156fb70AA5'
-const ARC_DOMAIN       = 7  // Circle CCTP domain for Arc testnet
+const ARC_DOMAIN              = 7   // Circle CCTP domain for Arc testnet
 
 // ABI encoding helpers
-function encodeUint(n: bigint): string { return n.toString(16).padStart(64, '0') }
-function encodeAddr(a: string): string { return a.replace('0x', '').padStart(64, '0') }
-function encodeBytes32(hex: string): string { return hex.replace('0x', '').padStart(64, '0') }
+function encodeUint(n: bigint): string  { return n.toString(16).padStart(64, '0') }
+function encodeAddr(a: string): string  { return a.replace('0x', '').padStart(64, '0') }
+function encodeBytes32(h: string): string { return h.replace('0x', '').padStart(64, '0') }
 
-// ERC20 approve(address spender, uint256 amount)
+// ERC20 approve(address spender, uint256 amount) — 0x095ea7b3
 function encodeApprove(spender: string, amount: bigint): string {
   return '0x095ea7b3' + encodeAddr(spender) + encodeUint(amount)
 }
 
-// TokenMessenger.depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken)
-// selector: keccak256("depositForBurn(uint256,uint32,bytes32,address)") = 0x6fd3504e
+// TokenMessenger.depositForBurn(uint256,uint32,bytes32,address) — 0x6fd3504e
 function encodeDepositForBurn(
-  amount: bigint,
-  destDomain: number,
-  mintRecipient: string,
-  burnToken: string,
+  amount: bigint, destDomain: number, mintRecipient: string, burnToken: string,
 ): string {
-  const selector = '0x6fd3504e'
-  const amt      = encodeUint(amount)
-  const domain   = encodeUint(BigInt(destDomain))
-  const recip    = encodeBytes32(mintRecipient)
-  const token    = encodeAddr(burnToken)
-  return selector + amt + domain + recip + token
+  return '0x6fd3504e' + encodeUint(amount) + encodeUint(BigInt(destDomain))
+    + encodeBytes32(mintRecipient) + encodeAddr(burnToken)
 }
 
 async function sendTx(from: string, to: string, data: string): Promise<string> {
   if (!window.ethereum) throw new Error('No wallet connected')
-  const txHash = await window.ethereum.request({
+  return window.ethereum.request({
     method: 'eth_sendTransaction',
     params: [{ from, to, data }],
-  })
-  return txHash as string
+  }) as Promise<string>
+}
+
+/** Poll until tx is mined. Throws if reverted or timed out. */
+async function waitForTx(hash: string, setStatus: (s: string) => void, label: string): Promise<void> {
+  if (!window.ethereum) return
+  const deadline = Date.now() + 5 * 60_000   // 5-minute timeout
+  while (Date.now() < deadline) {
+    const receipt = await window.ethereum.request({
+      method: 'eth_getTransactionReceipt',
+      params: [hash],
+    }) as { status: string } | null
+    if (receipt) {
+      if (receipt.status === '0x1') return
+      throw new Error(`${label} reverted on-chain`)
+    }
+    setStatus(`Waiting for ${label} to confirm…`)
+    await new Promise(r => setTimeout(r, 3000))
+  }
+  throw new Error(`${label} timed out — check wallet`)
 }
 
 interface Props {
-  meantimeAddr: string
-  userAddress:  string | null
-  chainId:      number | null
-  usdcAddr:     string
-  eurcAddr:     string
+  meantimeAddr:  string
+  userAddress:   string | null
+  chainId:       number | null
   switchNetwork: (chainId: number) => Promise<void>
 }
 
-type Step = 'idle' | 'switching' | 'approving' | 'burning' | 'pending' | 'done' | 'error'
+type Step = 'idle' | 'switching' | 'approving' | 'waiting-approve' | 'burning' | 'pending' | 'done' | 'error'
 
 export function SendPanel({ meantimeAddr, userAddress, chainId, switchNetwork }: Props) {
   const [recipient, setRecipient] = useState('')
   const [amount,    setAmount]    = useState('10')
   const [step,      setStep]      = useState<Step>('idle')
   const [status,    setStatus]    = useState('')
-  const [txHash,    setTxHash]    = useState('')
+  const [burnTx,    setBurnTx]    = useState('')
 
   const onSepolia = chainId === SEPOLIA_CHAIN_ID
-
-  const handleSwitchToSepolia = async () => {
-    setStep('switching')
-    setStatus('Switching to Sepolia…')
-    try {
-      await switchNetwork(SEPOLIA_CHAIN_ID)
-      setStep('idle')
-      setStatus('')
-    } catch {
-      setStep('error')
-      setStatus('Failed to switch network.')
-    }
-  }
+  const busy = step !== 'idle' && step !== 'done' && step !== 'error'
 
   const handleSend = async () => {
     if (!userAddress) { setStatus('Connect your wallet first.'); return }
-    if (!recipient || !/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
-      setStatus('Enter a valid Arc recipient address (0x…).')
+    if (!/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
+      setStatus('Enter a valid recipient address (0x…).')
       return
     }
     if (!amount || Number(amount) <= 0) { setStatus('Enter a valid amount.'); return }
 
-    const units = BigInt(Math.round(Number(amount) * 1e6))
+    const units        = BigInt(Math.round(Number(amount) * 1e6))
     const mintRecipient = meantimeAddr.replace('0x', '').padStart(64, '0')
 
     try {
-      // Step 1: Approve TokenMessenger to spend USDC
+      // 1. Approve CCTP TokenMessenger to spend USDC
       setStep('approving')
-      setStatus('Step 1/2 — Approve Sepolia USDC for CCTP…')
-      const approveData = encodeApprove(SEPOLIA_TOKEN_MESSENGER, units)
-      await sendTx(userAddress, SEPOLIA_USDC, approveData)
+      setStatus('Step 1/3 — Approve Sepolia USDC for CCTP…')
+      const approveTx = await sendTx(userAddress, SEPOLIA_USDC, encodeApprove(SEPOLIA_TOKEN_MESSENGER, units))
 
-      // Step 2: depositForBurn → burns USDC on Sepolia, emits CCTP message
+      // 2. Wait for approval to be mined before burning
+      //    (depositForBurn will revert if approve isn't confirmed yet)
+      setStep('waiting-approve')
+      await waitForTx(approveTx, setStatus, 'approve')
+
+      // 3. depositForBurn — burns USDC on Sepolia, emits CCTP MessageSent
       setStep('burning')
-      setStatus('Step 2/2 — Burning USDC on Sepolia via CCTP…')
-      const burnData = encodeDepositForBurn(units, ARC_DOMAIN, mintRecipient, SEPOLIA_USDC)
-      const burnTxHash = await sendTx(userAddress, SEPOLIA_TOKEN_MESSENGER, burnData)
-      setTxHash(burnTxHash)
+      setStatus('Step 2/3 — Confirm burn in MetaMask…')
+      const burnHash = await sendTx(
+        userAddress,
+        SEPOLIA_TOKEN_MESSENGER,
+        encodeDepositForBurn(units, ARC_DOMAIN, mintRecipient, SEPOLIA_USDC),
+      )
+      setBurnTx(burnHash)
 
-      // Step 3: Notify backend to track this transfer and mint the NFT on Arc
+      // Wait for burn to confirm on Sepolia before telling the backend.
+      // This ensures the backend finds the MessageSent log in the receipt.
+      await waitForTx(burnHash, setStatus, 'depositForBurn')
+
+      // 4. Tell the backend — tx is already mined, so it processes immediately
       setStep('pending')
-      setStatus('Notifying backend — minting receivable NFT on Arc…')
+      setStatus('Step 3/3 — Notifying backend…')
       const res = await fetch(`${API_BASE}/api/bridge/initiate-cctp`, {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ txHash: burnTxHash, recipient }),
+        body:    JSON.stringify({ txHash: burnHash, recipient }),
       })
-      const data = await res.json()
+      const body = await res.json()
 
       if (res.ok) {
         setStep('done')
-        setStatus(
-          `NFT minted for ${recipient.slice(0, 10)}…  ` +
-          `Settlement in ~14 min. Token ID: ${data.tokenId ?? '?'}`
-        )
+        setStatus(`Transfer confirmed — receivable NFT will appear in the marketplace shortly.`)
       } else {
         setStep('error')
-        setStatus(`Backend error: ${data.error ?? 'unknown'}`)
+        setStatus(`Backend error: ${body.error ?? 'unknown'}`)
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       setStep('error')
-      setStatus(msg.includes('user rejected') ? 'Rejected.' : `Error: ${msg}`)
+      setStatus(msg.includes('user rejected') ? 'Cancelled.' : `Error: ${msg}`)
     }
   }
-
-  const busy = step === 'switching' || step === 'approving' || step === 'burning' || step === 'pending'
 
   return (
     <div className="send-panel">
       <h2>Send USDC → Arc</h2>
-
       <p className="hint">
-        Burns Sepolia USDC via CCTP v1 and mints a receivable NFT on Arc.
-        Settlement arrives in ~14 minutes via Circle attestation.
+        Burns Sepolia USDC via CCTP v1. A receivable NFT is minted on Arc immediately.
+        The recipient can hold it or list it on the marketplace. Settlement arrives in ~14 minutes.
       </p>
 
       {!userAddress && (
@@ -144,8 +145,8 @@ export function SendPanel({ meantimeAddr, userAddress, chainId, switchNetwork }:
 
       {userAddress && !onSepolia && (
         <div className="network-prompt">
-          <p>You must be on <strong>Sepolia</strong> to initiate a CCTP transfer.</p>
-          <button onClick={handleSwitchToSepolia} disabled={busy}>
+          <p>Switch to <strong>Sepolia</strong> to initiate a CCTP transfer.</p>
+          <button onClick={() => switchNetwork(SEPOLIA_CHAIN_ID)} disabled={busy}>
             Switch to Sepolia
           </button>
         </div>
@@ -163,28 +164,27 @@ export function SendPanel({ meantimeAddr, userAddress, chainId, switchNetwork }:
           </label>
           <label>Amount (USDC)
             <input
-              type="number"
-              min="0.01"
+              type="number" min="0.01"
               value={amount}
               onChange={e => setAmount(e.target.value)}
               disabled={busy}
             />
           </label>
-          <button onClick={handleSend} disabled={busy || !userAddress}>
+          <button onClick={handleSend} disabled={busy}>
             {busy ? status : `Send ${amount} USDC`}
           </button>
           <p className="hint small">
-            Two wallet confirmations: approve USDC + burn via CCTP.
+            Three steps: approve USDC → wait for confirmation → burn via CCTP.
           </p>
         </div>
       )}
 
-      {status && !busy && (
+      {!busy && status && (
         <div className={`status-box ${step === 'error' ? 'err' : step === 'done' ? 'ok' : ''}`}>
           {status}
-          {txHash && (
-            <div style={{ marginTop: 4, fontSize: '0.8em', wordBreak: 'break-all' }}>
-              Sepolia tx: {txHash}
+          {burnTx && (
+            <div style={{ marginTop: 6, fontSize: '0.8em', wordBreak: 'break-all' }}>
+              Sepolia burn tx: {burnTx}
             </div>
           )}
         </div>

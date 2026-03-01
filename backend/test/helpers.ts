@@ -7,7 +7,8 @@ import type { Receivable } from '../src/store.js'
 export function mockCtx(overrides: Partial<AppCtx> = {}): AppCtx {
   return {
     publicClient: {
-      watchContractEvent: vi.fn(() => vi.fn()), // returns unwatch fn
+      getBlockNumber:     vi.fn().mockResolvedValue(1000n),
+      getContractEvents:  vi.fn().mockResolvedValue([]),
     } as unknown as AppCtx['publicClient'],
     walletClient: {
       writeContract: vi.fn().mockResolvedValue('0xdeadbeeftxhash'),

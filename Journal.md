@@ -42,3 +42,31 @@ Starting from a broken SendPanel (calls non-existent `deposit()` on MeanTime con
 5. Disconnect button in UI
 
 ---
+
+## Session 2 — 2026-02-28
+
+### Bugs fixed
+
+1. **Arc RPC rate limit** — Switched `ARC_RPC_URL` from QuickNode (`rpc.testnet.arc.network`) to Blockdaemon (`rpc.blockdaemon.testnet.arc.network`) in `.env`. No daily limit.
+
+2. **depositForBurn not awaited before backend notification** — `SendPanel.tsx` now calls `waitForTx(burnHash, ...)` before POSTing to `/api/bridge/initiate-cctp`. Previously the backend received an unconfirmed tx hash; if the burn reverted the backend silently did nothing but the user saw "NFT minted".
+
+3. **Race condition in mintOnArc** — Both `sepoliaWatcher` and `trackSepoliaTx` independently process the same Sepolia tx, causing a duplicate `MeanTime.mint()` call which reverts with `AlreadyMinted()`. Fixed by checking `tokenByMessageHash` on-chain before submitting the mint tx.
+
+4. **Stale receivables** — Old NFTs from previous test runs (1000 USDC tokenId#1, 500 USDC tokenId#2) showed in the marketplace. Settled them via `cleanup.ts` (mock-mint + settle). Both confirmed on-chain.
+
+5. **Confusing "Unlisted Receivables" section** — Removed from `Marketplace.tsx`. It showed other wallets' un-actionable NFTs and the stale ones, confusing the UX.
+
+6. **Stale tests** — `test/app.test.ts` tested `POST /api/bridge/mint` (deleted endpoint) and didn't expect `meantime` in `/api/tokens`. Both fixed.
+
+### Tests added
+- `src/tests/parseCctpMessage.test.ts` — 5 tests for CCTP v1 message parsing (destDomain, mintRecipient, amount, messageSender)
+- `src/tests/store.test.ts` — 9 tests for store upsert/patch/remove/subscribe and `serializeReceivable`
+- All 57 tests pass
+
+### Current flow (correct)
+1. Connect wallet on Sepolia → click Send → approve USDC → wait confirm → depositForBurn → wait confirm → backend notified → mintOnArc (skips if already minted) → Arc watcher picks up Minted event → SSE pushes to frontend → NFT appears in "My Receivables" for recipient
+2. Recipient lists at a price → Filler approves payment token → fills → becomes new beneficial owner
+3. ~14 min later: attestation polled, mock-mint USDC to MeanTime, settle() called → USDC sent to beneficial owner, NFT burned, removed from marketplace
+
+---

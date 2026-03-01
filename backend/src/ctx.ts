@@ -22,7 +22,7 @@ export interface Addresses {
 // Sepolia CCTP v1 contracts (Circle official)
 export const SEPOLIA_CCTP = {
   tokenMessenger:     '0x9f3B8679c73C2Fef8b59B4f3444d4e156fb70AA5' as `0x${string}`,
-  messageTransmitter: '0x7865fAfC2db2093669d92c0197e5d6428A5B16B9' as `0x${string}`,
+  messageTransmitter: '0x7865fAfC2db2093669d92c0F33AeEF291086BEFD' as `0x${string}`,
   usdc:               '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238' as `0x${string}`,
   domain:             0,
 }
@@ -53,7 +53,7 @@ export function buildCtx(): AppCtx {
   if (!privateKey) throw new Error('PRIVATE_KEY not set')
 
   const arc: Chain = {
-    id:   33111,
+    id:   5042002,   // Arc testnet chain ID (0x4cef52)
     name: 'Arc Testnet',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     rpcUrls: { default: { http: [rpcUrl] } },

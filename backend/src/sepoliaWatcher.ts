@@ -20,6 +20,14 @@ const POLL_INTERVAL_MS = 30_000
 const BLOCKS_PER_POLL = 2000n
 
 /**
+ * Populated by the initiate-cctp route before trackSepoliaTx runs.
+ * Maps Sepolia txHash (lowercase) → intended Arc recipient.
+ * This ensures the background scanner uses the correct recipient
+ * even if it processes the burn before trackSepoliaTx does.
+ */
+export const intendedRecipients = new Map<string, `0x${string}`>()
+
+/**
  * Parse the raw CCTP message bytes to extract key fields.
  * CCTP v1 message format (big-endian):
  *   0:  version        (4 bytes)
@@ -99,9 +107,14 @@ export function startSepoliaWatcher(ctx: AppCtx, store: Store): () => void {
 
           const messageHash  = keccak256(messageBytes)
           const inboundToken = ARC_CCTP.usdc || ctx.addresses.usdc
-          const recipient    = parsed.messageSender ?? ctx.account.address
 
-          console.log(`[sepolia-watcher] CCTP burn! hash=${messageHash} amount=${parsed.amount}`)
+          // Prefer the intended recipient registered by initiate-cctp over messageSender
+          const txHashKey = (log.transactionHash ?? '').toLowerCase()
+          const recipient  = intendedRecipients.get(txHashKey)
+            ?? (parsed.messageSender as `0x${string}`)
+            ?? ctx.account.address
+
+          console.log(`[sepolia-watcher] CCTP burn! hash=${messageHash} amount=${parsed.amount} recipient=${recipient}`)
           await mintOnArc(ctx, messageHash, inboundToken, parsed.amount, recipient)
           pollAttestation(ctx, store, messageHash, messageBytes).catch(err =>
             console.error('[sepolia-watcher] Attestation poller error:', err),
@@ -202,6 +215,18 @@ async function mintOnArc(
   recipient: `0x${string}`,
 ): Promise<bigint | null> {
   try {
+    // Check on-chain first — both sepoliaWatcher and trackSepoliaTx can race here
+    const existing = await ctx.publicClient.readContract({
+      address:      ctx.addresses.meantime,
+      abi:          MEANTIME_ABI,
+      functionName: 'tokenByMessageHash',
+      args:         [messageHash],
+    }).catch(() => 0n) as bigint
+    if (existing !== 0n) {
+      console.log(`[mint-on-arc] ${messageHash} already minted (tokenId=${existing}), skipping`)
+      return existing
+    }
+
     console.log(`[mint-on-arc] Minting: hash=${messageHash} amount=${amount} recipient=${recipient}`)
     const txHash = await ctx.walletClient.writeContract({
       address:      ctx.addresses.meantime,

@@ -82,6 +82,39 @@ export const MEANTIME_ABI = [
       { name: 'active',       type: 'bool'    },
     ],
   },
+  {
+    type: 'function',
+    name: 'tokenByMessageHash',
+    stateMutability: 'view',
+    inputs:  [{ name: 'messageHash', type: 'bytes32' }],
+    outputs: [{ name: 'tokenId', type: 'uint256' }],
+  },
+  // ── Write functions (marketplace) ───────────────────────────────────────────
+  {
+    type: 'function',
+    name: 'list',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'tokenId',      type: 'uint256' },
+      { name: 'reservePrice', type: 'uint256' },
+      { name: 'paymentToken', type: 'address' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'delist',
+    stateMutability: 'nonpayable',
+    inputs:  [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'fill',
+    stateMutability: 'nonpayable',
+    inputs:  [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [],
+  },
   // ── Write functions (bridge actions) ────────────────────────────────────────
   {
     type: 'function',
