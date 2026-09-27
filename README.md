@@ -1,4 +1,4 @@
-# MeanTime
+# MeanTime - Won $1000 Dollars for the Best On-Chain Liquidity Provider Track
 
 **Tokenised CCTP receivables.** Every cross-chain USDC transfer becomes a tradeable on-chain asset during the attestation window for a CCTP transfer to ARC.
 
